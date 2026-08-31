@@ -1,0 +1,515 @@
+import React, { useRef, useState, useEffect } from 'react';
+import { Stage, Layer, Image as KonvaImage, Rect, Line } from 'react-konva';
+import useImage from 'use-image';
+import CanvasControls from './CanvasControls';
+import EquipmentNode from './EquipmentNode';
+import SlotNode from './SlotNode';
+
+const FloorCanvas = ({ 
+  imageUrl, 
+  equipments = [], 
+  onEquipmentClick, 
+  onEquipmentMove,
+  isEditMode = false,
+  selectedEquipmentId = null,
+  highlightedSlotId = null,
+  slots = [],
+  onSlotDrop,
+  onItemDropOnSlot,
+  onSlotMove,
+  onSlotSelect,
+  onExport,
+  activeMobileSlotTemplate = null,
+  onCancelMobilePlacement = null,
+  onCanvasClick
+}) => {
+  const containerRef = useRef(null);
+  const stageRef = useRef(null);
+  const [image] = useImage(imageUrl);
+  
+  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const [stageState, setStageState] = useState({
+    scale: 1,
+    x: 0,
+    y: 0
+  });
+  const [selectedId, setSelectedId] = useState(selectedEquipmentId);
+  const [showGrid, setShowGrid] = useState(false);
+  const [gridSizeMultiplier, setGridSizeMultiplier] = useState(1);
+  const [gridOffset, setGridOffset] = useState({ x: 0, y: 0 });
+
+  // Sync prop changes
+  useEffect(() => {
+    if (selectedEquipmentId !== undefined) {
+      setSelectedId(selectedEquipmentId);
+    }
+  }, [selectedEquipmentId]);
+
+  // Disable grid if we exit edit mode
+  useEffect(() => {
+    if (!isEditMode) {
+      setShowGrid(false);
+    }
+  }, [isEditMode]);
+
+  // Window resize observer to update canvas dimensions safely
+  useEffect(() => {
+    const updateSize = () => {
+      if (containerRef.current) {
+        const newWidth = containerRef.current.offsetWidth;
+        const newHeight = containerRef.current.offsetHeight;
+        setDimensions(prev => {
+          if (prev.width === newWidth && prev.height === newHeight) return prev;
+          return { width: newWidth, height: newHeight };
+        });
+      }
+    };
+    
+    // Initial size
+    updateSize();
+    
+    // Slight delay to ensure layout is done
+    const timeout = setTimeout(updateSize, 100);
+    
+    window.addEventListener('resize', updateSize);
+    return () => {
+      clearTimeout(timeout);
+      window.removeEventListener('resize', updateSize);
+    };
+  }, []);
+
+  // Fit image to screen initially
+  useEffect(() => {
+    if (image && dimensions.width > 0) {
+      const scale = Math.min(
+        dimensions.width / image.width,
+        dimensions.height / image.height
+      ) * 0.9; // 90% of container to leave margin
+      
+      setStageState({
+        scale,
+        x: (dimensions.width - image.width * scale) / 2,
+        y: (dimensions.height - image.height * scale) / 2
+      });
+    }
+  }, [image, dimensions]);
+
+  // Handle zooming via mouse wheel
+  const handleWheel = (e) => {
+    e.evt.preventDefault();
+    
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const scaleBy = 1.1;
+    const oldScale = stage.scaleX();
+    const pointer = stage.getPointerPosition();
+
+    if (!pointer) return;
+
+    const mousePointTo = {
+      x: (pointer.x - stage.x()) / oldScale,
+      y: (pointer.y - stage.y()) / oldScale,
+    };
+
+    const newScale = e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy;
+    
+    // Limit zoom
+    if (newScale < 0.1 || newScale > 10) return;
+
+    setStageState({
+      scale: newScale,
+      x: pointer.x - mousePointTo.x * newScale,
+      y: pointer.y - mousePointTo.y * newScale,
+    });
+  };
+
+  const handleZoomIn = () => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const oldScale = stage.scaleX();
+    const newScale = oldScale * 1.2;
+    if (newScale > 10) return;
+    
+    setStageState(prev => ({
+      ...prev,
+      scale: newScale,
+      // Adjust position to center zoom roughly
+      x: prev.x - (dimensions.width / 2) * 0.2 * oldScale,
+      y: prev.y - (dimensions.height / 2) * 0.2 * oldScale,
+    }));
+  };
+
+  const handleZoomOut = () => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const oldScale = stage.scaleX();
+    const newScale = oldScale / 1.2;
+    if (newScale < 0.1) return;
+    
+    setStageState(prev => ({
+      ...prev,
+      scale: newScale,
+      x: prev.x + (dimensions.width / 2) * 0.2 * newScale,
+      y: prev.y + (dimensions.height / 2) * 0.2 * newScale,
+    }));
+  };
+
+  const handleResetZoom = () => {
+    if (image) {
+      const scale = Math.min(
+        dimensions.width / image.width,
+        dimensions.height / image.height
+      ) * 0.9;
+      
+      setStageState({
+        scale,
+        x: (dimensions.width - image.width * scale) / 2,
+        y: (dimensions.height - image.height * scale) / 2
+      });
+    }
+  };
+
+  const handlePrint = () => {
+    // Basic print implementation: get dataURL and open in new window to print
+    if (!stageRef.current) return;
+    const dataUrl = stageRef.current.toDataURL({ pixelRatio: 2 });
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Print Floor Plan</title>
+          <style>
+            body { margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+            img { max-width: 100%; max-height: 100vh; object-fit: contain; }
+            @media print {
+              @page { size: landscape; margin: 0; }
+              body { margin: 0; }
+            }
+          </style>
+        </head>
+        <body>
+          <img src="${dataUrl}" onload="window.print(); window.close();" />
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  const handleStageClick = (e) => {
+    // Only allow left click (0) or touch events (where button is undefined)
+    if (e.evt && e.evt.button !== undefined && e.evt.button !== 0) return;
+
+    const stage = e.target.getStage();
+    const pointerPosition = stage ? stage.getPointerPosition() : null;
+
+    if (pointerPosition && activeMobileSlotTemplate && isEditMode) {
+      const x = (pointerPosition.x - stageState.x) / stageState.scale;
+      const y = (pointerPosition.y - stageState.y) / stageState.scale;
+      
+      if (onSlotDrop) {
+        onSlotDrop(activeMobileSlotTemplate.id, x, y);
+      }
+      if (onCancelMobilePlacement) {
+        onCancelMobilePlacement();
+      }
+      return;
+    }
+
+    // If clicked on empty area, deselect or trigger canvas click
+    if (e.target === e.target.getStage() || e.target.attrs.id === 'bg-image' || e.target.attrs.id === 'grid-layer') {
+      setSelectedId(null);
+      
+      if (pointerPosition) {
+        const x = (pointerPosition.x - stageState.x) / stageState.scale;
+        const y = (pointerPosition.y - stageState.y) / stageState.scale;
+        
+        if (onCanvasClick && isEditMode) {
+          onCanvasClick({ x, y });
+        }
+      }
+    }
+  };
+
+  // Generate grid lines
+  const baseGridSize = 40;
+  const currentGridSize = baseGridSize * gridSizeMultiplier;
+  const gridLines = [];
+  
+  if (showGrid && isEditMode && image) {
+    const numVertical = Math.ceil(image.width / currentGridSize) + 1;
+    const numHorizontal = Math.ceil(image.height / currentGridSize) + 1;
+    const strokeWidth = 1 / stageState.scale; // keep line thickness constant
+
+    const offsetX = gridOffset.x % currentGridSize;
+    const offsetY = gridOffset.y % currentGridSize;
+
+    for (let i = -1; i <= numVertical; i++) {
+      const x = i * currentGridSize + offsetX;
+      if (x >= 0 && x <= image.width) {
+        gridLines.push(
+          <Line 
+            key={`v-${i}`} 
+            points={[x, 0, x, image.height]} 
+            stroke="rgba(0,0,0,0.3)" 
+            strokeWidth={strokeWidth} 
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+        );
+      }
+    }
+    for (let j = -1; j <= numHorizontal; j++) {
+      const y = j * currentGridSize + offsetY;
+      if (y >= 0 && y <= image.height) {
+        gridLines.push(
+          <Line 
+            key={`h-${j}`} 
+            points={[0, y, image.width, y]} 
+            stroke="rgba(0,0,0,0.3)" 
+            strokeWidth={strokeWidth} 
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+        );
+      }
+    }
+  }
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    if (!isEditMode) return;
+    
+    try {
+      if (stageRef.current) {
+        stageRef.current.setPointersPositions(e);
+      }
+    } catch (err) {
+      console.warn('Konva setPointersPositions error:', err);
+    }
+    
+    let pos = stageRef.current ? stageRef.current.getPointerPosition() : null;
+    if (!pos && e.nativeEvent) {
+       pos = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY };
+    }
+    if (!pos) {
+       pos = { x: 400, y: 300 }; // safe fallback
+    }
+
+    const x = (pos.x - stageState.x) / stageState.scale;
+    const y = (pos.y - stageState.y) / stageState.scale;
+    
+    try {
+      const dataStr = e.dataTransfer.getData('application/json');
+      if (!dataStr) return;
+      
+      const data = JSON.parse(dataStr);
+      
+      if (data.type === 'slot-template' && onSlotDrop) {
+        onSlotDrop(data.categoryId, x, y);
+      } else if (data.type === 'stock-item' && onItemDropOnSlot) {
+        // Find nearest slot
+        const nearestSlot = slots.find(s => {
+          const dx = s.position_x - x;
+          const dy = s.position_y - y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          return dist < 30; // 30px radius threshold
+        });
+        
+        if (nearestSlot) {
+          onItemDropOnSlot(data.categoryId, nearestSlot.id);
+        } else {
+          if (onItemDropOnSlot) onItemDropOnSlot(data.categoryId, null);
+        }
+      }
+    } catch (err) {
+      console.error('Error during drop:', err);
+    }
+  };
+
+  return (
+    <div 
+      ref={containerRef} 
+      style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDrop={handleDrop}
+    >
+      {/* Active Mobile Slot Placement Banner */}
+      {activeMobileSlotTemplate && (
+        <div style={{
+          position: 'absolute',
+          top: '16px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 100,
+          background: 'var(--color-primary, #3a9542)',
+          color: 'white',
+          padding: '10px 18px',
+          borderRadius: '24px',
+          boxShadow: '0 4px 18px rgba(0,0,0,0.25)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          fontSize: '0.85rem',
+          fontWeight: '700',
+          maxWidth: '90%',
+          pointerEvents: 'auto'
+        }}>
+          <span>📌 Mode Slot ({activeMobileSlotTemplate.name}): Ketuk lokasi pada denah</span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onCancelMobilePlacement) onCancelMobilePlacement();
+            }}
+            style={{
+              background: 'rgba(255,255,255,0.25)',
+              border: 'none',
+              color: 'white',
+              borderRadius: '50%',
+              width: '22px',
+              height: '22px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}
+            title="Batal"
+          >
+            ×
+          </button>
+        </div>
+      )}
+      
+      {/* Background pattern for canvas to look nice */}
+      <div style={{
+        position: 'absolute',
+        top: 0, left: 0, right: 0, bottom: 0,
+        backgroundImage: 'radial-gradient(var(--color-text-muted) 1px, transparent 1px)',
+        backgroundSize: '20px 20px',
+        opacity: 0.2,
+        pointerEvents: 'none'
+      }} />
+
+      <Stage
+        width={dimensions.width}
+        height={dimensions.height}
+        onWheel={handleWheel}
+        draggable={!activeMobileSlotTemplate} // Disable stage panning while placing slot on mobile to prevent Konva touch drag freeze
+        x={stageState.x}
+        y={stageState.y}
+        scaleX={stageState.scale}
+        scaleY={stageState.scale}
+        ref={stageRef}
+        onDragEnd={(e) => {
+          // Update state after panning
+          if (e.target === e.target.getStage()) {
+            setStageState(prev => ({
+              ...prev,
+              x: e.target.x(),
+              y: e.target.y()
+            }));
+          }
+        }}
+        onClick={handleStageClick}
+        onTap={handleStageClick}
+      >
+        <Layer>
+          {/* Main Background Image */}
+          {image && (
+            <KonvaImage
+              id="bg-image"
+              image={image}
+              width={image.width}
+              height={image.height}
+            />
+          )}
+
+          {/* Grid Overlay */}
+          {gridLines}
+
+          {/* Slots */}
+          {slots.map((slot) => (
+            <SlotNode
+              key={slot.id}
+              slot={slot}
+              isSelected={selectedId === (slot.equipment_id || slot.id)}
+              isHighlighted={highlightedSlotId === slot.id}
+              onSelect={(eq) => {
+                const id = eq ? eq.id : slot.id;
+                setSelectedId(id);
+                if (onSlotSelect) onSlotSelect(slot, eq);
+              }}
+              onDragEnd={(id, x, y, isFilled = false) => {
+                if (onSlotMove && isEditMode) {
+                  if (showGrid && !isFilled) {
+                    const snapX = Math.round((x - gridOffset.x) / currentGridSize) * currentGridSize + gridOffset.x;
+                    const snapY = Math.round((y - gridOffset.y) / currentGridSize) * currentGridSize + gridOffset.y;
+                    onSlotMove(id, snapX, snapY, isFilled);
+                  } else {
+                    onSlotMove(id, x, y, isFilled);
+                  }
+                }
+              }}
+              isDraggable={isEditMode}
+              scale={stageState.scale}
+            />
+          ))}
+
+          {/* Equipments (legacy/non-slot ones) */}
+          {equipments.filter(eq => !slots.some(s => s.equipment_id === eq.id)).map((eq) => (
+            <EquipmentNode
+              key={eq.id}
+              equipment={eq}
+              isSelected={selectedId === eq.id}
+              onSelect={(eq) => {
+                setSelectedId(eq.id);
+                if (onEquipmentClick) onEquipmentClick(eq);
+              }}
+              onDragEnd={(id, x, y) => {
+                if (onEquipmentMove && isEditMode) {
+                  // Snap to grid if grid is active
+                  if (showGrid) {
+                    const snapX = Math.round((x - gridOffset.x) / currentGridSize) * currentGridSize + gridOffset.x;
+                    const snapY = Math.round((y - gridOffset.y) / currentGridSize) * currentGridSize + gridOffset.y;
+                    onEquipmentMove(id, snapX, snapY);
+                  } else {
+                    onEquipmentMove(id, x, y);
+                  }
+                }
+              }}
+              isDraggable={isEditMode}
+              scale={stageState.scale}
+            />
+          ))}
+        </Layer>
+      </Stage>
+
+      <CanvasControls 
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onResetZoom={handleResetZoom}
+        onPrint={handlePrint}
+        onExport={onExport}
+        isEditMode={isEditMode}
+        showGrid={showGrid}
+        onToggleGrid={() => setShowGrid(!showGrid)}
+        gridSizeMultiplier={gridSizeMultiplier}
+        onGridSizeChange={setGridSizeMultiplier}
+        onGridOffsetChange={(dx, dy) => setGridOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }))}
+      />
+    </div>
+  );
+};
+
+export default FloorCanvas;
