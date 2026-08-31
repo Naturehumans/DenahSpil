@@ -9,7 +9,7 @@ const CanvasControls = ({
   return (
     <div style={{
       position: 'absolute',
-      bottom: '24px',
+      bottom: '120px',
       right: '24px',
       display: 'flex',
       flexDirection: 'column',

@@ -119,7 +119,7 @@ const SlotNode = ({
           }}
           scaleX={invertedScale}
           scaleY={invertedScale}
-          opacity={isDraggingItem ? 0.7 : 1}
+          opacity={isDraggingItemRef.current ? 0.7 : 1}
         >
           {(isSelected || isHighlighted) && (
             <Circle

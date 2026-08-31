@@ -29,12 +29,13 @@ export const ToastProvider = ({ children }) => {
       {children}
       <div style={{
         position: 'fixed',
-        top: '20px',
+        top: '80px',
         right: '20px',
         zIndex: 9999,
         display: 'flex',
         flexDirection: 'column',
-        gap: '10px'
+        gap: '10px',
+        maxWidth: 'calc(100vw - 40px)'
       }}>
         {toasts.map((toast) => (
           <div key={toast.id} className={`neu-raised`} style={{
