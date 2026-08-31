@@ -31,7 +31,7 @@ const MainLayout = ({
   onSelectCategory,
   slots = [],
   onDeleteSlot,
-  onStartPlacement
+  onSelectMobileSlotTemplate
 }) => {
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
@@ -141,7 +141,7 @@ const MainLayout = ({
               categories={categories}
               slots={slots}
               onDeleteSlot={onDeleteSlot}
-              onStartPlacement={onStartPlacement}
+              onSelectMobileSlotTemplate={onSelectMobileSlotTemplate}
             />
           ) : (
             <RightSidebar 

@@ -63,17 +63,9 @@ const DashboardPage = () => {
 
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [categoryBlockedNotice, setCategoryBlockedNotice] = useState(null);
-  const [placementSlotCategory, setPlacementSlotCategory] = useState(null);
+  const [activeMobileSlotTemplate, setActiveMobileSlotTemplate] = useState(null);
   
   const { showToast } = useToast();
-
-  const handleStartPlacement = (catId) => {
-    const cat = categories.find(c => c.id === catId);
-    setPlacementSlotCategory(cat);
-    if (cat) {
-      showToast(`Mode Pasang ${cat.name}: Tahan 1.5 detik pada denah untuk memasang`, 'info');
-    }
-  };
 
   const fetchInitialData = async () => {
     try {
@@ -214,6 +206,7 @@ const DashboardPage = () => {
   };
 
   const handleSlotDrop = (categoryId, x, y) => {
+    setActiveMobileSlotTemplate(null);
     const cat = categories.find(c => c.id === categoryId);
     setConfirmSlotDrop({ category: cat, x, y, roomName: '' });
   };
@@ -619,18 +612,13 @@ const DashboardPage = () => {
 
 
   const handleSlotSelect = (slot, eq) => {
-    if (!slot) return;
-    const filledEq = eq || slot.equipment;
-    if (filledEq) {
-      setSelectedEquipment(filledEq);
+    if (eq) {
+      setSelectedEquipment(eq);
       setSelectedSlot(slot);
       setActiveModal('equipment_detail');
-    } else if (isEditMode) {
-      setSelectedSlot(slot);
-      setActiveModal('delete_slot_confirm');
     } else {
       setSelectedSlot(slot);
-      showToast(`Slot ${slot.room_name || slot.slot_code || ''} masih kosong. Aktifkan Mode Edit untuk mengelola barang.`, 'info');
+      setActiveModal('delete_slot_confirm');
     }
   };
 
@@ -990,7 +978,10 @@ const DashboardPage = () => {
       onSelectCategory={setSelectedCategoryId}
       slots={slots}
       onDeleteSlot={handleDeleteSlot}
-      onStartPlacement={handleStartPlacement}
+      onSelectMobileSlotTemplate={(cat) => {
+        setActiveMobileSlotTemplate(cat);
+        showToast(`Slot ${cat.name} dipilih! Tekan 1s pada denah untuk menempatkan.`, 'info');
+      }}
     >
       {isEditMode && (
         <div className="edit-mode-banner" style={{
@@ -1011,7 +1002,7 @@ const DashboardPage = () => {
           animation: 'pulse 2s infinite'
         }}>
           <div style={{ flexShrink: 0, width: '8px', height: '8px', borderRadius: '50%', background: 'white' }} />
-          <span>Mode Edit: Klik denah untuk tambah</span>
+          <span>Mode Edit Active</span>
         </div>
       )}
 
@@ -1073,8 +1064,8 @@ const DashboardPage = () => {
         onSlotMove={handleSlotMove}
         onSlotSelect={handleSlotSelect}
         onExport={handleExport}
-        placementSlotCategory={placementSlotCategory}
-        onCancelPlacement={() => setPlacementSlotCategory(null)}
+        activeMobileSlotTemplate={activeMobileSlotTemplate}
+        onCancelMobilePlacement={() => setActiveMobileSlotTemplate(null)}
       />
 
       <Modal 

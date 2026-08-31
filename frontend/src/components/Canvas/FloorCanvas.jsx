@@ -18,7 +18,10 @@ const FloorCanvas = ({
   onItemDropOnSlot,
   onSlotMove,
   onSlotSelect,
-  onExport
+  onExport,
+  activeMobileSlotTemplate = null,
+  onCancelMobilePlacement = null,
+  onCanvasClick
 }) => {
   const containerRef = useRef(null);
   const stageRef = useRef(null);
@@ -197,17 +200,33 @@ const FloorCanvas = ({
     // Only allow left click (0) or touch events (where button is undefined)
     if (e.evt && e.evt.button !== undefined && e.evt.button !== 0) return;
 
+    const stage = e.target.getStage();
+    const pointerPosition = stage ? stage.getPointerPosition() : null;
+
+    if (pointerPosition && activeMobileSlotTemplate && isEditMode) {
+      const x = (pointerPosition.x - stageState.x) / stageState.scale;
+      const y = (pointerPosition.y - stageState.y) / stageState.scale;
+      
+      if (onSlotDrop) {
+        onSlotDrop(activeMobileSlotTemplate.id, x, y);
+      }
+      if (onCancelMobilePlacement) {
+        onCancelMobilePlacement();
+      }
+      return;
+    }
+
     // If clicked on empty area, deselect or trigger canvas click
     if (e.target === e.target.getStage() || e.target.attrs.id === 'bg-image' || e.target.attrs.id === 'grid-layer') {
       setSelectedId(null);
       
-      // Calculate coordinates relative to image for placing new items
-      const pointerPosition = e.target.getStage().getPointerPosition();
-      const x = (pointerPosition.x - stageState.x) / stageState.scale;
-      const y = (pointerPosition.y - stageState.y) / stageState.scale;
-      
-      if (onCanvasClick && isEditMode) {
-        onCanvasClick({ x, y });
+      if (pointerPosition) {
+        const x = (pointerPosition.x - stageState.x) / stageState.scale;
+        const y = (pointerPosition.y - stageState.y) / stageState.scale;
+        
+        if (onCanvasClick && isEditMode) {
+          onCanvasClick({ x, y });
+        }
       }
     }
   };
@@ -324,6 +343,53 @@ const FloorCanvas = ({
       onDragEnter={handleDragEnter}
       onDrop={handleDrop}
     >
+      {/* Active Mobile Slot Placement Banner */}
+      {activeMobileSlotTemplate && (
+        <div style={{
+          position: 'absolute',
+          top: '16px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 100,
+          background: 'var(--color-primary, #3a9542)',
+          color: 'white',
+          padding: '10px 18px',
+          borderRadius: '24px',
+          boxShadow: '0 4px 18px rgba(0,0,0,0.25)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          fontSize: '0.85rem',
+          fontWeight: '700',
+          maxWidth: '90%',
+          pointerEvents: 'auto'
+        }}>
+          <span>📌 Mode Slot ({activeMobileSlotTemplate.name}): Ketuk lokasi pada denah</span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onCancelMobilePlacement) onCancelMobilePlacement();
+            }}
+            style={{
+              background: 'rgba(255,255,255,0.25)',
+              border: 'none',
+              color: 'white',
+              borderRadius: '50%',
+              width: '22px',
+              height: '22px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}
+            title="Batal"
+          >
+            ×
+          </button>
+        </div>
+      )}
       
       {/* Background pattern for canvas to look nice */}
       <div style={{
@@ -339,7 +405,7 @@ const FloorCanvas = ({
         width={dimensions.width}
         height={dimensions.height}
         onWheel={handleWheel}
-        draggable // Enables panning
+        draggable={!activeMobileSlotTemplate} // Disable stage panning while placing slot on mobile to prevent Konva touch drag freeze
         x={stageState.x}
         y={stageState.y}
         scaleX={stageState.scale}

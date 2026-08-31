@@ -1,19 +1,46 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Target, X, Trash2 } from 'lucide-react';
 
-const EditRightSidebar = ({ isOpen, onClose, categories = [], slots = [], onDeleteSlot, onStartPlacement }) => {
+const EditRightSidebar = ({ isOpen, onClose, categories = [], slots = [], onDeleteSlot, onSelectMobileSlotTemplate }) => {
   const [selectedCategoryId, setSelectedCategoryId] = useState(categories.length > 0 ? categories[0].id : '');
+  const touchStartPos = useRef({ x: 0, y: 0 });
+  const isTouchMoving = useRef(false);
 
-  const handleDragStart = (e, catId) => {
-    setSelectedCategoryId(catId);
-    e.dataTransfer.setData('application/json', JSON.stringify({
-      type: 'slot-template',
-      categoryId: catId
-    }));
-    e.dataTransfer.effectAllowed = 'copy';
+  const handleItemSelect = (cat) => {
+    setSelectedCategoryId(cat.id);
+    if (onSelectMobileSlotTemplate) {
+      onSelectMobileSlotTemplate(cat);
+    }
+    if (onClose) {
+      onClose();
+    }
   };
 
-  const selectedCategory = categories.find(c => c.id === selectedCategoryId);
+  const handleTouchStart = (e) => {
+    const touch = e.touches[0];
+    if (touch) {
+      touchStartPos.current = { x: touch.clientX, y: touch.clientY };
+      isTouchMoving.current = false;
+    }
+  };
+
+  const handleTouchMove = (e) => {
+    const touch = e.touches[0];
+    if (touch) {
+      const dx = Math.abs(touch.clientX - touchStartPos.current.x);
+      const dy = Math.abs(touch.clientY - touchStartPos.current.y);
+      if (dx > 8 || dy > 8) {
+        isTouchMoving.current = true;
+      }
+    }
+  };
+
+  const handleTouchEnd = (e, cat) => {
+    if (!isTouchMoving.current) {
+      e.preventDefault();
+      handleItemSelect(cat);
+    }
+  };
 
   return (
     <aside 
@@ -43,58 +70,68 @@ const EditRightSidebar = ({ isOpen, onClose, categories = [], slots = [], onDele
         </label>
         
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {categories.map(cat => (
-            <div
-              key={cat.id}
-              className="neu-inset"
-              style={{
-                padding: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                borderRadius: '8px',
-                border: selectedCategoryId === cat.id ? `2px solid ${cat.color}` : '2px solid transparent',
-                cursor: 'pointer'
-              }}
-              onClick={() => {
-                setSelectedCategoryId(cat.id);
-                if (onStartPlacement) {
-                  onStartPlacement(cat.id);
-                }
-                if (onClose) {
-                  onClose();
-                }
-              }}
-            >
-              <div 
-                draggable={true}
-                onDragStart={(e) => handleDragStart(e, cat.id)}
-                style={{ 
-                  width: '32px', 
-                  height: '32px', 
-                  borderRadius: '50%', 
-                  border: `2px dashed ${cat.color || '#3b82f6'}`,
-                  color: cat.color || '#3b82f6',
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center',
-                  fontWeight: 'bold',
-                  cursor: 'grab',
-                  flexShrink: 0
+          {categories.map(cat => {
+            const isSelected = selectedCategoryId === cat.id;
+            return (
+              <div
+                key={cat.id}
+                className="neu-inset"
+                style={{
+                  padding: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  borderRadius: '8px',
+                  border: isSelected ? `2px solid ${cat.color || '#3b82f6'}` : '2px solid transparent',
+                  background: isSelected ? 'rgba(58, 149, 66, 0.08)' : 'transparent',
+                  transition: 'background 0.2s ease, border 0.2s ease',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none',
+                  touchAction: 'pan-y'
                 }}
+                onClick={() => handleItemSelect(cat)}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={(e) => handleTouchEnd(e, cat)}
               >
-                {cat.name.charAt(0).toUpperCase()}
+                <div 
+                  draggable={true}
+                  onDragStart={(e) => {
+                    setSelectedCategoryId(cat.id);
+                    e.dataTransfer.setData('application/json', JSON.stringify({
+                      type: 'slot-template',
+                      categoryId: cat.id
+                    }));
+                    e.dataTransfer.effectAllowed = 'copy';
+                  }}
+                  style={{ 
+                    width: '32px', 
+                    height: '32px', 
+                    borderRadius: '50%', 
+                    border: `2px dashed ${cat.color || '#3b82f6'}`,
+                    color: cat.color || '#3b82f6',
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center',
+                    fontWeight: 'bold',
+                    cursor: 'grab',
+                    flexShrink: 0
+                  }}
+                >
+                  {cat.name.charAt(0).toUpperCase()}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text-primary)' }}>
+                    {cat.name}
+                  </span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
+                    (Klik / Ketuk untuk menempatkan)
+                  </span>
+                </div>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text-primary)' }}>
-                  {cat.name}
-                </span>
-                <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
-                  (Tap / drag ke denah)
-                </span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
