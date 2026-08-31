@@ -1,0 +1,34 @@
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\pages\InventoryPage.jsx:1129: <span>⏱️ Waktu Pemakaian: {usageStr}</span>
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\pages\DashboardPage.jsx:1357: 🚪 RUANGAN / ROOM
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\components\Layout\EditRightSidebar.jsx:126: {isFilled ? '✓' : slot.category?.name?.charAt(0).toUpperCase()}
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\pages\DashboardPage.jsx:1317: 📍 ID Tempat: <strong>{slotCode}</strong>
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\DashboardPage.jsx:1417: <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#22c55e', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1rem', flexShrink: 0 }}>✓</div>
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\DashboardPage.jsx:1292: 🚪 RUANGAN / ROOM
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\pages\DashboardPage.jsx:1366: 🏢 LOKASI & AREA DENAH
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\components\Layout\EditRightSidebar.jsx:126: {isFilled ? '✓' : slot.category?.name?.charAt(0).toUpperCase()}
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\pages\DashboardPage.jsx:1339: 📦 ID BARANG (ASET)
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\DashboardPage.jsx:1252: 📍 ID Tempat: <strong>{slotCode}</strong>
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\pages\DashboardPage.jsx:1497: <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#f59e0b', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1rem', flexShrink: 0 }}>⚠</div>
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\DashboardPage.jsx:1301: 🏢 LOKASI & AREA DENAH
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\DashboardPage.jsx:1265: 📍 ID TEMPAT (SLOT)
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\HistoryPage.jsx:689: { field: 'slot_code', label: '📍 ID Tempat (Slot)' },
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\pages\DashboardPage.jsx:1330: 📍 ID TEMPAT (SLOT)
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\HistoryPage.jsx:690: { field: 'asset_id', label: '📦 ID Barang (Aset)' },
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\pages\DashboardPage.jsx:1479: <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#22c55e', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1rem', flexShrink: 0 }}>✓</div>
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\DashboardPage.jsx:1459: <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#ef4444', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1rem', flexShrink: 0 }}>✕</div>
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\DashboardPage.jsx:1274: 📦 ID BARANG (ASET)
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\pages\DashboardPage.jsx:1348: 🏷️ MERK & TIPE
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\pages\DashboardPage.jsx:1515: <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#ef4444', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1rem', flexShrink: 0 }}>✕</div>
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\pages\HistoryPage.jsx:611: { field: 'slot_code', label: '📍 ID Tempat (Slot)' },
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\pages\HistoryPage.jsx:612: { field: 'asset_id', label: '📦 ID Barang (Aset)' },
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\DashboardPage.jsx:1283: 🏷️ MERK & TIPE
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\DashboardPage.jsx:1476: title="⚠️ Peringatan Masa Garansi (< 1 Tahun)"
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\pages\DashboardPage.jsx:1321: 📦 ID Barang: <strong>{selectedEquipment.name}</strong>
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\DashboardPage.jsx:1256: 📦 ID Barang: <strong>{selectedEquipment.name}</strong>
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\DashboardPage.jsx:1530: ℹ️ Jika barang ini rusak atau diganti, Anda disarankan mencatatnya untuk klaim garansi vendor sebelum menghapusnya secara permanen.
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\HistoryPage.jsx:855: ✕
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\pages\HistoryPage.jsx:773: ✕
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\DashboardPage.jsx:1438: <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#f59e0b', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '1rem', flexShrink: 0 }}>⚠</div>
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\InventoryPage.jsx:1017: <span>⏱️ Waktu Pemakaian: {usageStr}</span>
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil Denah/frontend/src\pages\DashboardPage.jsx:1500: 🛡️
+c:/Users/GBI CILILITAN/Desktop/Spil-new/Spil Denah/Spil DenahD/Spil Denah/frontend/src\pages\DashboardPage.jsx:1548: title={`⚠️ Peringatan Masa Garansi (< ${warrantyConfirm?.warrantyMonths >= 12 ? Math.floor(warrantyConfirm.warrantyMonths / 12) + ' Tahun' : warrantyConfirm?.warrantyMonths + ' Bulan'})`}

@@ -1,0 +1,34 @@
+# Dependencies
+node_modules
+/node_modules
+frontend/node_modules
+backend/venv*
+backend/test_venv*
+*venv*
+venv*
+test_venv*
+backend/__pycache__
+
+# Build outputs
+/dist
+frontend/dist
+/build
+
+# Environment variables
+.env
+.env.local
+*.env
+
+# Python cache & SQLite DBs
+*.pyc
+__pycache__/
+*.sqlite3
+*.db
+
+# Logs & OS junk
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
