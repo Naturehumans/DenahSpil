@@ -25,13 +25,7 @@ async def get_assets(status: Optional[str] = None, db: AsyncSession = Depends(ge
 
 @router.get("/inventory-logs", response_model=List[InventoryHistoryLogResponse])
 async def get_inventory_logs(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    from sqlalchemy import text
-    for col in ['building_name', 'floor_name', 'room_name', 'brand', 'model_number', 'status']:
-        try:
-            await db.execute(text(f"ALTER TABLE inventory_history_logs ADD COLUMN {col} VARCHAR(100)"))
-            await db.commit()
-        except Exception:
-            pass
+
 
     result = await db.execute(
         select(InventoryHistoryLog)
