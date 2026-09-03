@@ -40,7 +40,8 @@ const InventoryPage = () => {
     model_number: '',
     stock: '1',
     min_stock: '1',
-    warranty_months: '0'
+    warranty_months: '0',
+    purchase_date: ''
   });
 
   // Stock & Damaged modals
@@ -316,7 +317,8 @@ const InventoryPage = () => {
       model_number: '',
       stock: '1',
       min_stock: '1',
-      warranty_months: '0'
+      warranty_months: '0',
+      purchase_date: ''
     });
     setShowAddBrandModal(true);
   };
@@ -346,7 +348,8 @@ const InventoryPage = () => {
         model_number: brandForm.model_number.trim() || 'Standard',
         stock: parseInt(brandForm.stock) || 0,
         min_stock: parseInt(brandForm.min_stock) || 0,
-        warranty_months: parseInt(brandForm.warranty_months) || 0
+        warranty_months: parseInt(brandForm.warranty_months) || 0,
+        purchase_date: brandForm.purchase_date || null
       };
 
       const updatedBrands = [...currentBrands, newBrandItem];
@@ -1343,18 +1346,31 @@ const InventoryPage = () => {
                 </div>
               </div>
 
-              <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--color-text)' }}>
-                  Masa Garansi (Bulan)
-                </label>
-                <input 
-                  type="number" 
-                  min="0"
-                  placeholder="Contoh: 12, 24, 36 (0 jika tanpa garansi)"
-                  value={brandForm.warranty_months}
-                  onChange={(e) => setBrandForm({ ...brandForm, warranty_months: e.target.value })}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '0.95rem', outline: 'none' }}
-                />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--color-text)' }}>
+                    Masa Garansi (Bulan)
+                  </label>
+                  <input 
+                    type="number" 
+                    min="0"
+                    placeholder="0 jika tanpa garansi"
+                    value={brandForm.warranty_months}
+                    onChange={(e) => setBrandForm({ ...brandForm, warranty_months: e.target.value })}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '0.95rem', outline: 'none', boxSizing: 'border-box' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--color-text)' }}>
+                    Tanggal Pembelian
+                  </label>
+                  <input 
+                    type="date" 
+                    value={brandForm.purchase_date}
+                    onChange={(e) => setBrandForm({ ...brandForm, purchase_date: e.target.value })}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '0.95rem', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' }}
+                  />
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '10px' }}>
@@ -1403,13 +1419,40 @@ const InventoryPage = () => {
                 <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text)' }}>
                   Warna Penanda
                 </label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
+                  {[
+                    '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', 
+                    '#22c55e', '#10b981', '#14b8a6', '#0ea5e9', '#3b82f6', 
+                    '#6366f1', '#8b5cf6', '#d946ef', '#ec4899', '#64748b'
+                  ].map(c => (
+                    <div 
+                      key={c}
+                      onClick={() => setCatColor(c)}
+                      style={{
+                        width: '30px', height: '30px', borderRadius: '50%', backgroundColor: c,
+                        cursor: 'pointer',
+                        border: catColor === c ? '2px solid white' : '2px solid transparent',
+                        boxShadow: catColor === c ? `0 0 0 2px ${c}` : '0 2px 4px rgba(0,0,0,0.1)',
+                        transform: catColor === c ? 'scale(1.15)' : 'scale(1)',
+                        transition: 'all 0.2s ease'
+                      }}
+                      title={c}
+                    />
+                  ))}
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <input 
-                    type="color" 
-                    value={catColor}
-                    onChange={(e) => setCatColor(e.target.value)}
-                    style={{ width: '44px', height: '44px', padding: 0, border: 'none', borderRadius: '8px', cursor: 'pointer' }}
-                  />
+                  <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', fontWeight: '500' }}>Warna Kustom:</span>
+                  <div style={{ 
+                    width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', 
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)', border: '2px solid white'
+                  }}>
+                    <input 
+                      type="color" 
+                      value={catColor}
+                      onChange={(e) => setCatColor(e.target.value)}
+                      style={{ width: '150%', height: '150%', margin: '-25%', padding: 0, border: 'none', cursor: 'pointer' }}
+                    />
+                  </div>
                   <span style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', fontWeight: '600' }}>{catColor}</span>
                 </div>
               </div>

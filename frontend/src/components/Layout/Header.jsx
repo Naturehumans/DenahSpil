@@ -69,30 +69,6 @@ const Header = ({ onMenuClick, onAlertClick, alertsCount }) => {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-        {/* Toggle Right Sidebar Button (Daftar Barang) */}
-        <button
-          id="alert-btn"
-          onClick={onAlertClick}
-          style={{
-            position: 'relative',
-            background: 'rgba(255,255,255,0.1)',
-            border: 'none',
-            padding: '10px',
-            borderRadius: '50%',
-            cursor: 'pointer',
-            color: 'white',
-            transition: 'background 0.2s',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.2)'}
-          onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-          title="Daftar Barang"
-        >
-          <List size={20} color="white" />
-        </button>
-
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ textAlign: 'right', display: 'none' }} id="user-info">
             <p style={{ margin: 0, fontSize: '0.875rem', fontWeight: '600', color: 'white' }}>{user?.username || 'User'}</p>

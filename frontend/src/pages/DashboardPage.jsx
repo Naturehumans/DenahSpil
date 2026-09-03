@@ -1393,6 +1393,29 @@ const DashboardPage = () => {
           const slotCode = slot?.slot_code || selectedEquipment?.slot_code;
           const catColor = slot?.category?.color || selectedEquipment.category?.color || '#3b82f6';
           const catName = slot?.category?.name || selectedEquipment.category?.name;
+          
+          let purchaseDateStr = '-';
+          try {
+            const savedBrands = localStorage.getItem('spil_category_brands');
+            if (savedBrands) {
+              const map = JSON.parse(savedBrands);
+              const catKey = (catName || '').toLowerCase();
+              const catBrands = map[catKey] || map[selectedEquipment.category_id] || [];
+              const brandObj = catBrands.find(b => 
+                (b.brand || '').toLowerCase() === (selectedEquipment.brand || '').toLowerCase() &&
+                (b.model_number || '').toLowerCase() === (selectedEquipment.model_number || '').toLowerCase()
+              );
+              if (brandObj && brandObj.purchase_date) {
+                const d = new Date(brandObj.purchase_date);
+                if (!isNaN(d)) {
+                  purchaseDateStr = d.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                } else {
+                  purchaseDateStr = brandObj.purchase_date;
+                }
+              }
+            }
+          } catch(e) {}
+
           return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', padding: '6px 0' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 16px', background: 'rgba(255,255,255,0.6)', borderRadius: '12px', border: '1px solid rgba(0,0,0,0.05)' }}>
@@ -1465,7 +1488,16 @@ const DashboardPage = () => {
                 </p>
               </div>
 
-              <div style={{ background: 'rgba(255, 255, 255, 0.5)', padding: '12px 14px', borderRadius: '10px', gridColumn: '1 / -1' }}>
+              <div style={{ background: 'rgba(255, 255, 255, 0.5)', padding: '12px 14px', borderRadius: '10px' }}>
+                <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.5px' }}>
+                  TANGGAL PEMBELIAN
+                </p>
+                <p style={{ margin: '6px 0 0', fontWeight: '700', color: 'var(--color-text-primary)', fontSize: '0.95rem' }}>
+                  {purchaseDateStr}
+                </p>
+              </div>
+
+              <div style={{ background: 'rgba(255, 255, 255, 0.5)', padding: '12px 14px', borderRadius: '10px' }}>
                 <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.5px' }}>
                   LOKASI & AREA DENAH
                 </p>

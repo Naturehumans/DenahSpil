@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Header from './Header';
 import LeftSidebar from './LeftSidebar';
 import RightSidebar from './RightSidebar';
@@ -35,6 +35,12 @@ const MainLayout = ({
 }) => {
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
+
+  useEffect(() => {
+    const handleToggle = () => setRightOpen(prev => !prev);
+    window.addEventListener('toggle-right-sidebar', handleToggle);
+    return () => window.removeEventListener('toggle-right-sidebar', handleToggle);
+  }, []);
 
   return (
     <div className="main-layout" style={{
