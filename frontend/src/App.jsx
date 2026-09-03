@@ -8,6 +8,7 @@ const LoginPage = React.lazy(() => import('./pages/LoginPage'));
 const ForgotPasswordPage = React.lazy(() => import('./pages/ForgotPasswordPage'));
 const DashboardPage = React.lazy(() => import('./pages/DashboardPage'));
 const HistoryPage = React.lazy(() => import('./pages/HistoryPage'));
+const InventoryPage = React.lazy(() => import('./pages/InventoryPage'));
 
 function App() {
   return (
@@ -26,6 +27,7 @@ function App() {
             <Route element={<ProtectedRoute />}>
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/history" element={<HistoryPage />} />
+              <Route path="/inventory" element={<InventoryPage />} />
             </Route>
 
             {/* Redirect root to dashboard */}
