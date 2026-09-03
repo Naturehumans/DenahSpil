@@ -108,6 +108,54 @@ async def get_inventory_logs(db: AsyncSession = Depends(get_db), current_user: U
 
 @router.delete("/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_asset(asset_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    pass # to be implemented further below, just replacing context
+
+@router.post("/assets/add-stock", status_code=status.HTTP_201_CREATED)
+async def add_stock(data: dict, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    category_id = data.get("category_id")
+    brand = data.get("brand")
+    model_number = data.get("model_number")
+    quantity = int(data.get("quantity", 1))
+
+    # Fetch category
+    from app.models.equipment_category import EquipmentCategory
+    cat_res = await db.execute(select(EquipmentCategory).where(EquipmentCategory.id == category_id))
+    cat = cat_res.scalars().first()
+    
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    cat_name = cat.name
+
+    for _ in range(quantity):
+        asset_inv = AssetInventory(
+            category_id=category_id,
+            asset_id=f"{cat_name} - {brand}",
+            status='available',
+            brand=brand,
+            model_number=model_number
+        )
+        db.add(asset_inv)
+
+    log = InventoryHistoryLog(
+        category_id=category_id,
+        asset_id=f"{cat_name} - {brand}",
+        action_type='add_stock',
+        building_name="Gudang Utama",
+        floor_name="-",
+        room_name="-",
+        brand=brand,
+        model_number=model_number,
+        status="Siap Pakai",
+        location_info=f"Stok Masuk Gudang ({cat_name})",
+        performed_by=current_user.id
+    )
+    db.add(log)
+    await db.commit()
+    return {"success": True}
+
+@router.delete("/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_asset_real(asset_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     result = await db.execute(select(AssetInventory).where(AssetInventory.id == asset_id).options(selectinload(AssetInventory.category)))
     asset = result.scalars().first()
     if not asset:

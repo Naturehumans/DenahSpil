@@ -15,3 +15,13 @@ export const deleteAsset = async (assetId) => {
   const response = await api.delete(`/assets/${assetId}`);
   return response.data;
 };
+
+export const addStockToInventory = async (data) => {
+  const response = await api.post('/assets/add-stock', data);
+  return response.data;
+};
+
+export const restoreAsset = async (data) => {
+  // Temporary stub
+  return Promise.resolve({ success: true });
+};

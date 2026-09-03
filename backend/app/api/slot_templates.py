@@ -257,18 +257,21 @@ async def assign_equipment_to_slot(
     
     # Log history
     room_txt = f" - Ruang: {slot.room_name}" if slot.room_name else ""
+    b_name = slot.floor.building.name if (slot.floor and slot.floor.building) else "Gedung Utama"
+    f_name = slot.floor.name if slot.floor else "Lantai 1"
+
     log = InventoryHistoryLog(
         category_id=cat.id,
         asset_id=auto_name,
         slot_code=slot.slot_code,
         action_type="deploy",
-        building_name=slot.floor.building.name,
-        floor_name=slot.floor.name,
+        building_name=b_name,
+        floor_name=f_name,
         room_name=slot.room_name,
         brand=brand,
         model_number=model_number,
         status="Dipasang",
-        location_info=f"Penempatan di {slot.floor.building.name} - {slot.floor.name}{room_txt}",
+        location_info=f"Penempatan di {b_name} - {f_name}{room_txt}",
         performed_by=current_user.id
     )
     db.add(log)
@@ -438,6 +441,8 @@ async def unassign_equipment_from_slot(
                 category_id=cat.id,
                 asset_id=eq.name if eq else f"{cat.name} - Asset",
                 status='available' if destination == 'good' else 'damaged',
+                brand=eq.brand if eq else None,
+                model_number=eq.model_number if eq else None,
             )
             db.add(asset_inv)
 
