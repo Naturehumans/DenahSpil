@@ -31,4 +31,6 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 .vscode/
-.idea/
+# Local PostgreSQL binaries & data
+pgsql/
+backend/pgsql/
