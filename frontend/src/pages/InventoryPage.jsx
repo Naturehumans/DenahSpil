@@ -140,7 +140,7 @@ const InventoryPage = () => {
 
       showToast(`Merk ${item.brand} (${stockQty} unit) berhasil dibuang & dicatat dalam riwayat log`, 'success');
       setConfirmDeleteBrand(null);
-      await fetchData();
+      await fetchData(false);
     } catch (err) {
       console.error(err);
       showToast('Gagal membuang stok barang', 'error');
@@ -158,9 +158,19 @@ const InventoryPage = () => {
     setVisibleCount(50);
   }, [selectedBrandDetail]);
 
-  const fetchData = async () => {
+  const getDaysToExpiration = (expiredDateStr) => {
+    if (!expiredDateStr) return null;
+    const exp = new Date(expiredDateStr);
+    const now = new Date();
+    exp.setHours(0,0,0,0);
+    now.setHours(0,0,0,0);
+    const diffTime = exp.getTime() - now.getTime();
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  };
+
+  const fetchData = async (showLoading = true) => {
     try {
-      setLoading(true);
+      if (showLoading) setLoading(true);
       const cats = await getCategories();
       setCategories(cats);
       
@@ -173,6 +183,10 @@ const InventoryPage = () => {
           const catKey = (cat.name || '').toLowerCase();
           const brands = map[catKey] || map[cat.id] || [];
           brands.forEach(b => {
+            if (b.expired_date) {
+              const days = getDaysToExpiration(b.expired_date);
+              if (days < 0) return; // exclude expired items from Siap Pakai
+            }
             flatBrands.push({
               ...b,
               category_id: cat.id,
@@ -230,7 +244,7 @@ const InventoryPage = () => {
       console.error(e);
       showToast('Gagal memuat data inventori', 'error');
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
@@ -278,7 +292,7 @@ const InventoryPage = () => {
       }
       setShowAddCategoryModal(false);
       setEditingCategoryModal(null);
-      fetchData();
+      fetchData(false);
     } catch (err) {
       showToast('Gagal menyimpan kategori', 'error');
     }
@@ -304,7 +318,7 @@ const InventoryPage = () => {
       await deleteCategory(catToBlock.id);
       showToast('Kategori berhasil dihapus!', 'success');
       setConfirmDeleteCategory(null);
-      fetchData();
+      fetchData(false);
     } catch (err) {
       setConfirmDeleteCategory(null);
       setCategoryBlockedNotice(catToBlock);
@@ -318,7 +332,8 @@ const InventoryPage = () => {
       stock: '1',
       min_stock: '1',
       warranty_months: '0',
-      purchase_date: ''
+      purchase_date: '',
+      expired_date: ''
     });
     setShowAddBrandModal(true);
   };
@@ -349,7 +364,8 @@ const InventoryPage = () => {
         stock: parseInt(brandForm.stock) || 0,
         min_stock: parseInt(brandForm.min_stock) || 0,
         warranty_months: parseInt(brandForm.warranty_months) || 0,
-        purchase_date: brandForm.purchase_date || null
+        purchase_date: brandForm.purchase_date || null,
+        expired_date: brandForm.expired_date || null
       };
 
       const updatedBrands = [...currentBrands, newBrandItem];
@@ -395,7 +411,7 @@ const InventoryPage = () => {
 
       showToast(`Berhasil menambah barang ${newBrandItem.brand}!`, 'success');
       setShowAddBrandModal(false);
-      fetchData();
+      fetchData(false);
     } catch (err) {
       console.error(err);
       showToast('Gagal menambahkan barang', 'error');
@@ -463,7 +479,7 @@ const InventoryPage = () => {
       showToast(`Berhasil menambah ${stockToAdd} stok untuk ${addStockModal.brand}`, 'success');
       setAddStockModal(null);
       setStockToAdd(1);
-      fetchData();
+      fetchData(false);
     } catch (err) {
       console.error(err);
       showToast('Gagal menambah stok', 'error');
@@ -539,7 +555,7 @@ const InventoryPage = () => {
       } catch (e) { console.error('Local history log save error:', e); }
 
       showToast('Barang berhasil diperbaiki & masuk ke Siap Pakai', 'success');
-      await fetchData();
+      await fetchData(false);
     } catch (e) {
       console.error(e);
       showToast('Gagal memulihkan barang', 'error');
@@ -577,7 +593,7 @@ const InventoryPage = () => {
 
       showToast('Barang rusak berhasil dibuang', 'success');
       setConfirmDeleteDamaged(null);
-      fetchData();
+      fetchData(false);
     } catch (e) {
       console.error(e);
       showToast('Gagal membuang barang', 'error');
@@ -802,6 +818,15 @@ const InventoryPage = () => {
                             }}>
                               {totalStock} Total Stok
                             </span>
+                            {catBrands.some(b => b.stock <= (b.min_stock || 0)) && (
+                              <span style={{ 
+                                padding: '4px 10px', borderRadius: '8px', fontSize: '0.82rem', fontWeight: '800',
+                                background: 'rgba(239, 68, 68, 0.12)', color: '#dc2626', border: '1px solid rgba(239, 68, 68, 0.3)',
+                                display: 'flex', alignItems: 'center', gap: '4px'
+                              }} title="Ada barang yang stoknya kurang dari atau sama dengan minimum stok!">
+                                <AlertTriangle size={14} /> Stok Minim
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1368,6 +1393,20 @@ const InventoryPage = () => {
                     type="date" 
                     value={brandForm.purchase_date}
                     onChange={(e) => setBrandForm({ ...brandForm, purchase_date: e.target.value })}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '0.95rem', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--color-text)' }}>
+                    Tanggal Kedaluwarsa (Opsional)
+                  </label>
+                  <input 
+                    type="date" 
+                    value={brandForm.expired_date || ''}
+                    onChange={(e) => setBrandForm({ ...brandForm, expired_date: e.target.value })}
                     style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '0.95rem', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' }}
                   />
                 </div>

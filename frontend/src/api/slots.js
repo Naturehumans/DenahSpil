@@ -45,8 +45,16 @@ export const moveItemBetweenSlots = async (fromSlotId, toSlotId) => {
   return response.data;
 };
 
-export const unassignItemFromSlot = async (slotId, destination) => {
-  const url = destination ? `/slots/${slotId}/unassign?destination=${destination}` : `/slots/${slotId}/unassign`;
+export const unassignItemFromSlot = async (slotId, destination, actionDate) => {
+  let url = `/slots/${slotId}/unassign`;
+  const params = new URLSearchParams();
+  if (destination) params.append('destination', destination);
+  if (actionDate) params.append('action_date', actionDate);
+  
+  if (params.toString()) {
+    url += `?${params.toString()}`;
+  }
+  
   const response = await api.delete(url);
   return response.data;
 };

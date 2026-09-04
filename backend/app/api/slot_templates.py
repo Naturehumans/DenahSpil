@@ -391,6 +391,7 @@ async def move_equipment_between_slots(
 async def unassign_equipment_from_slot(
     slot_id: uuid.UUID,
     destination: str = None, # 'good', 'damaged', 'discard'
+    action_date: str = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -444,6 +445,12 @@ async def unassign_equipment_from_slot(
                 brand=eq.brand if eq else None,
                 model_number=eq.model_number if eq else None,
             )
+            if action_date:
+                from datetime import datetime
+                try:
+                    asset_inv.created_at = datetime.fromisoformat(action_date)
+                except ValueError:
+                    pass
             db.add(asset_inv)
 
     # Save to InventoryHistoryLog for /history view ONLY if category exists
@@ -463,6 +470,12 @@ async def unassign_equipment_from_slot(
             location_info=f"Dilepas dari {bldg_name} - {flr_name}{rm_suffix}",
             performed_by=current_user.id
         )
+        if action_date:
+            from datetime import datetime
+            try:
+                log.created_at = datetime.fromisoformat(action_date)
+            except ValueError:
+                pass
         db.add(log)
     
     slot.equipment_id = None

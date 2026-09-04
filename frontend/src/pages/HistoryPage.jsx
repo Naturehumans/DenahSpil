@@ -28,10 +28,21 @@ const HistoryPage = () => {
   const navigate = useNavigate();
   const { showToast } = useToast();
   
-  const [viewTab, setViewTab] = useState('history'); // 'history' (Default), 'matrix', or 'usage'
+  const [viewTab, setViewTab] = useState('history'); // 'history' (Default), 'matrix', 'usage', or 'expired'
   const [logs, setLogs] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [expiredItems, setExpiredItems] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  const getDaysToExpiration = (expiredDateStr) => {
+    if (!expiredDateStr) return null;
+    const exp = new Date(expiredDateStr);
+    const now = new Date();
+    exp.setHours(0,0,0,0);
+    now.setHours(0,0,0,0);
+    const diffTime = exp.getTime() - now.getTime();
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  };
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -107,8 +118,34 @@ const HistoryPage = () => {
 
       setLogs(mergedLogs);
       setCategories(Array.isArray(catsRes) ? catsRes : []);
-    } catch (err) {
-      console.error(err);
+
+      // Load expired items from localStorage
+      try {
+        const savedBrands = localStorage.getItem('spil_category_brands');
+        const map = savedBrands ? JSON.parse(savedBrands) : {};
+        let exItems = [];
+        Object.keys(map).forEach(key => {
+          // ensure we only process the key once if it's stored by both name and ID
+          const brands = map[key] || [];
+          brands.forEach(b => {
+            if (b.expired_date && !exItems.some(ex => ex.id === b.id)) {
+              exItems.push({
+                ...b,
+                category_name: (Array.isArray(catsRes) ? catsRes : []).find(c => c.id === key || c.name.toLowerCase() === key)?.name || key
+              });
+            }
+          });
+        });
+        // Sort expired items by date closest to expiration
+        exItems.sort((a, b) => new Date(a.expired_date) - new Date(b.expired_date));
+        setExpiredItems(exItems);
+      } catch (e) {
+        console.error("Error loading expired items:", e);
+      }
+      
+    } catch (e) {
+      console.error(e);
+      showToast('Gagal memuat data riwayat', 'error');
     } finally {
       setLoading(false);
     }
@@ -400,6 +437,7 @@ const HistoryPage = () => {
             <option value="history">⏱️ Riwayat Data</option>
             <option value="matrix">🔲 List Aset & Matriks</option>
             <option value="usage">📄 Daftar Pemakaian</option>
+            <option value="expired">🚨 Barang Expired</option>
           </select>
         </div>
 
@@ -495,6 +533,31 @@ const HistoryPage = () => {
               <FileSpreadsheet size={16} />
               <span>Daftar Pemakaian</span>
             </button>
+
+            <button
+              onClick={() => setViewTab('expired')}
+              style={{
+                padding: '10px 16px',
+                borderRadius: '12px',
+                border: 'none',
+                cursor: 'pointer',
+                fontWeight: '700',
+                fontSize: '0.8125rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: viewTab === 'expired' ? 'var(--color-primary)' : 'transparent',
+                color: viewTab === 'expired' ? 'white' : 'var(--color-text-secondary)',
+                boxShadow: viewTab === 'expired' ? '0 4px 14px rgba(58, 149, 66, 0.35)' : 'none',
+                transition: 'all 0.25s ease',
+                whiteSpace: 'nowrap',
+                flex: '1 1 auto',
+                justifyContent: 'center'
+              }}
+            >
+              <AlertTriangle size={16} />
+              <span>Barang Expired</span>
+            </button>
           </div>
         </div>
 
@@ -502,6 +565,64 @@ const HistoryPage = () => {
           <AssetDashboardMatrix onRegisterExport={(fn) => { matrixExportRef.current = fn; }} />
         ) : viewTab === 'usage' ? (
           <CategoryUsageTracker onRegisterExport={(fn) => { usageExportRef.current = fn; }} />
+        ) : viewTab === 'expired' ? (
+          <div className="neu-raised" style={{ borderRadius: '12px', overflow: 'hidden', background: 'var(--color-bg)', boxShadow: '0 8px 30px rgba(0,0,0,0.08)' }}>
+            {expiredItems.length === 0 ? (
+              <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
+                <AlertTriangle size={48} color="var(--color-text-muted)" style={{ marginBottom: '16px' }} />
+                <h3 style={{ margin: '0 0 8px 0', color: 'var(--color-text)' }}>Tidak ada data barang expired</h3>
+                <p style={{ margin: 0, fontSize: '0.875rem' }}>Tidak ada barang yang tercatat memiliki tanggal kedaluwarsa.</p>
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem', fontFamily: 'Inter, sans-serif' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--color-primary)', color: 'white' }}>
+                      <th style={{ padding: '14px 16px', fontWeight: '700' }}>Kategori Barang</th>
+                      <th style={{ padding: '14px 16px', fontWeight: '700' }}>Merk & Tipe</th>
+                      <th style={{ padding: '14px 16px', fontWeight: '700' }}>Jumlah Stok Expired</th>
+                      <th style={{ padding: '14px 16px', fontWeight: '700' }}>Tanggal Pembelian</th>
+                      <th style={{ padding: '14px 16px', fontWeight: '700' }}>Tanggal Kedaluwarsa</th>
+                      <th style={{ padding: '14px 16px', fontWeight: '700' }}>Status / Sisa Hari</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expiredItems.map((item, index) => {
+                      const days = getDaysToExpiration(item.expired_date);
+                      const isExpired = days < 0;
+                      return (
+                        <tr key={index} style={{ borderBottom: '1px solid #e2e8f0', background: index % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                          <td style={{ padding: '12px 16px', fontWeight: '600' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              {isExpired && <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#dc2626', flexShrink: 0 }} title="Sudah Kedaluwarsa!" />}
+                              {item.category_name}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px 16px', color: '#334155' }}>{item.brand} ({item.model_number})</td>
+                          <td style={{ padding: '12px 16px', fontWeight: '700', color: 'var(--color-primary)' }}>{item.stock} Unit</td>
+                          <td style={{ padding: '12px 16px', color: '#475569' }}>{item.purchase_date ? new Date(item.purchase_date).toLocaleDateString('id-ID', {day: '2-digit', month: '2-digit', year: 'numeric'}) : '-'}</td>
+                          <td style={{ padding: '12px 16px', fontWeight: '600', color: isExpired ? '#dc2626' : 'inherit' }}>
+                            {new Date(item.expired_date).toLocaleDateString('id-ID', {day: '2-digit', month: '2-digit', year: 'numeric'})}
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            {isExpired ? (
+                              <span style={{ padding: '6px 10px', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.12)', color: '#dc2626', fontWeight: '700', fontSize: '0.8rem', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                                Sudah Kedaluwarsa
+                              </span>
+                            ) : (
+                              <span style={{ padding: '6px 10px', borderRadius: '6px', background: 'rgba(245, 158, 11, 0.12)', color: '#d97706', fontWeight: '700', fontSize: '0.8rem', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+                                {days} Hari Lagi
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         ) : (
           <>
         {/* Filters Bar (ABOVE Summary Cards) */}

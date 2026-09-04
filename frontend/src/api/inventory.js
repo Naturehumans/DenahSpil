@@ -22,6 +22,6 @@ export const addStockToInventory = async (data) => {
 };
 
 export const restoreAsset = async (data) => {
-  // Temporary stub
-  return Promise.resolve({ success: true });
+  const response = await api.post('/assets/restore', data);
+  return response.data;
 };

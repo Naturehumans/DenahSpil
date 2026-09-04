@@ -49,6 +49,7 @@ const DashboardPage = () => {
   const [categories, setCategories] = useState([]);
   const [slots, setSlots] = useState([]);
   
+  const [unassignDate, setUnassignDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [activeModal, setActiveModal] = useState(null); // 'floor', 'category', 'equipment', 'equipment_detail', 'equipment_edit'
   const [inventoryInitialTab, setInventoryInitialTab] = useState('good');
   const [selectedEquipment, setSelectedEquipment] = useState(null);
@@ -486,14 +487,25 @@ const DashboardPage = () => {
   const handleUnassignItem = async (slotId, destination = null) => {
     try {
       const slotToUnassign = slots.find(s => s.id === slotId);
-      const eq = slotToUnassign?.equipment;
-      const cat = slotToUnassign?.category || categories.find(c => c.id === slotToUnassign?.category_id);
+      if (!slotToUnassign) return;
+      
+      const cat = categories.find(c => c.id === slotToUnassign.category_id);
+      const eq = slotToUnassign.equipment || (slotToUnassign.equipment_id ? equipments.find(e => e.id === slotToUnassign.equipment_id) : null);
+      
+      let formattedDate = null;
+      if (destination && unassignDate) {
+        // Create an ISO string keeping the time but using the selected date
+        const d = new Date(unassignDate);
+        d.setHours(new Date().getHours());
+        d.setMinutes(new Date().getMinutes());
+        formattedDate = d.toISOString();
+      }
 
       if (slotToUnassign && slotToUnassign.equipment_id) {
         setEquipments(prev => prev.filter(e => e.id !== slotToUnassign.equipment_id));
       }
 
-      await unassignItemFromSlot(slotId, destination);
+      await unassignItemFromSlot(slotId, destination, formattedDate);
       setSlots(prev => prev.map(s => s.id === slotId ? { ...s, equipment_id: null, equipment: null } : s));
       
       // If returned to "Masuk Inventori Baru (Stok Siap Pakai)", restore brand stock by 1
@@ -512,6 +524,7 @@ const DashboardPage = () => {
       
       setActiveModal(null);
       setSelectedSlot(null);
+      setUnassignDate('');
       showToast(
         destination === 'good' 
           ? 'Barang dilepas & stok merk berhasil dikembalikan (+1)' 
@@ -528,15 +541,27 @@ const DashboardPage = () => {
 
   const handleUpdateEquipmentStatus = async (equipmentId, newStatus) => {
     try {
-      const updatedEq = await updateEquipment(equipmentId, { status: newStatus });
+      const responseEq = await updateEquipment(equipmentId, { status: newStatus });
+      const existingEq = equipments.find(e => e.id === equipmentId) || {};
+      const updatedEq = { ...existingEq, ...responseEq, category: existingEq.category || responseEq.category };
+      
       setEquipments(prev => prev.map(eq => eq.id === equipmentId ? updatedEq : eq));
-      if (selectedSlot) {
+      
+      const currentSlot = selectedSlot || slots.find(s => s.equipment_id === equipmentId);
+
+      if (currentSlot) {
         setSlots(prev => prev.map(s => s.equipment_id === equipmentId ? { ...s, equipment: updatedEq } : s));
       }
+      
       setSelectedEquipment(updatedEq);
       showToast('Kondisi barang berhasil diubah', 'success');
     } catch (err) {
-      showToast(err.response?.data?.detail || 'Gagal mengubah kondisi barang', 'error');
+      let errorMsg = 'Gagal mengubah kondisi barang';
+      const detail = err.response?.data?.detail;
+      if (typeof detail === 'string') errorMsg = detail;
+      else if (Array.isArray(detail)) errorMsg = detail[0]?.msg || JSON.stringify(detail);
+      
+      showToast(errorMsg, 'error');
     }
   };
 
@@ -658,6 +683,7 @@ const DashboardPage = () => {
   const handleCloseModal = () => {
     setActiveModal(null);
     setSelectedSlot(null);
+    setUnassignDate('');
   };
 
   // --- Area / Building Operations ---
@@ -895,7 +921,16 @@ const DashboardPage = () => {
     if (!selectedEquipment) return;
     try {
       const cat = categories.find(c => c.id === selectedEquipment.category_id);
-      await deleteEquipment(selectedEquipment.id, destination);
+      
+      let formattedDate = null;
+      if (destination && unassignDate) {
+        const d = new Date(unassignDate);
+        d.setHours(new Date().getHours());
+        d.setMinutes(new Date().getMinutes());
+        formattedDate = d.toISOString();
+      }
+
+      await deleteEquipment(selectedEquipment.id, destination, formattedDate);
       setEquipments(equipments.filter(eq => eq.id !== selectedEquipment.id));
       
       if (destination === 'good' && cat) {
@@ -1395,6 +1430,7 @@ const DashboardPage = () => {
           const catName = slot?.category?.name || selectedEquipment.category?.name;
           
           let purchaseDateStr = '-';
+          let expiredDateStr = '-';
           try {
             const savedBrands = localStorage.getItem('spil_category_brands');
             if (savedBrands) {
@@ -1405,12 +1441,22 @@ const DashboardPage = () => {
                 (b.brand || '').toLowerCase() === (selectedEquipment.brand || '').toLowerCase() &&
                 (b.model_number || '').toLowerCase() === (selectedEquipment.model_number || '').toLowerCase()
               );
-              if (brandObj && brandObj.purchase_date) {
-                const d = new Date(brandObj.purchase_date);
-                if (!isNaN(d)) {
-                  purchaseDateStr = d.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                } else {
-                  purchaseDateStr = brandObj.purchase_date;
+              if (brandObj) {
+                if (brandObj.purchase_date) {
+                  const d = new Date(brandObj.purchase_date);
+                  if (!isNaN(d)) {
+                    purchaseDateStr = d.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                  } else {
+                    purchaseDateStr = brandObj.purchase_date;
+                  }
+                }
+                if (brandObj.expired_date) {
+                  const ed = new Date(brandObj.expired_date);
+                  if (!isNaN(ed)) {
+                    expiredDateStr = ed.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                  } else {
+                    expiredDateStr = brandObj.expired_date;
+                  }
                 }
               }
             }
@@ -1505,6 +1551,17 @@ const DashboardPage = () => {
                   {currentBuilding?.name || 'Gedung Utama'} — {currentFloor?.name || 'Lantai 1'}
                 </p>
               </div>
+
+              {expiredDateStr !== '-' && (
+                <div style={{ background: 'rgba(255, 255, 255, 0.5)', padding: '12px 14px', borderRadius: '10px' }}>
+                  <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.5px' }}>
+                    TANGGAL KEDALUWARSA
+                  </p>
+                  <p style={{ margin: '6px 0 0', fontWeight: '700', color: 'var(--color-danger)', fontSize: '0.95rem' }}>
+                    {expiredDateStr}
+                  </p>
+                </div>
+              )}
             </div>
             
             
@@ -1597,9 +1654,23 @@ const DashboardPage = () => {
         title="Status & Tujuan Pelepasan Barang"
       >
         <div style={{ padding: '8px' }}>
-          <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem', marginBottom: '20px' }}>
+          <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem', marginBottom: '12px' }}>
             Kemana Anda ingin memindahkan barang ini dari template denah? Status akan langsung terhubung ke <strong>History Log</strong>.
           </p>
+          
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text)', marginBottom: '8px' }}>
+              Tanggal Pelepasan / Pembaruan:
+            </label>
+            <input 
+              type="date" 
+              value={unassignDate}
+              onChange={(e) => setUnassignDate(e.target.value)}
+              className="neu-inset"
+              style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.9rem' }}
+            />
+          </div>
+          
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <button 
               className="neu-inset"

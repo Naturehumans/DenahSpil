@@ -9,7 +9,7 @@ from app.database import get_db
 from app.models.asset_inventory import AssetInventory
 from app.models.inventory_history_log import InventoryHistoryLog
 from app.models.user import User
-from app.schemas.inventory import AssetInventoryResponse, InventoryHistoryLogResponse
+from app.schemas.inventory import AssetInventoryResponse, InventoryHistoryLogResponse, AssetRestoreRequest
 from app.api.deps import get_current_user
 
 router = APIRouter()
@@ -167,3 +167,27 @@ async def delete_asset_real(asset_id: uuid.UUID, db: AsyncSession = Depends(get_
     await db.delete(asset)
     await db.commit()
     return None
+
+@router.post("/assets/restore")
+async def restore_asset(request: AssetRestoreRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    result = await db.execute(select(AssetInventory).where(AssetInventory.asset_id == request.asset_id, AssetInventory.status == 'damaged'))
+    asset = result.scalars().first()
+    
+    if asset:
+        asset.status = 'available'
+        
+        log = InventoryHistoryLog(
+            category_id=asset.category_id,
+            asset_id=asset.asset_id,
+            brand=asset.brand,
+            model_number=asset.model_number,
+            action_type='repair',
+            status='Siap Pakai (Hasil Perbaikan)',
+            location_info=f"Diperbaiki dari Gudang Rusak -> Kembali ke Stok Siap Pakai",
+            performed_by=current_user.id
+        )
+        db.add(log)
+        await db.commit()
+        return {"success": True, "message": "Asset restored"}
+    
+    raise HTTPException(status_code=404, detail="Damaged asset not found")

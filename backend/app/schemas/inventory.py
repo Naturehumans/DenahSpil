@@ -4,6 +4,12 @@ from typing import Optional, List
 from datetime import datetime
 from app.schemas.equipment_category import CategoryResponse
 
+class AssetRestoreRequest(BaseModel):
+    asset_id: str
+    category_id: Optional[uuid.UUID] = None
+    brand: Optional[str] = None
+    model_number: Optional[str] = None
+
 class AssetInventoryBase(BaseModel):
     category_id: uuid.UUID
     asset_id: str
