@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Line } from 'react-konva';
 import useImage from 'use-image';
 import CanvasControls from './CanvasControls';
@@ -37,6 +37,16 @@ const FloorCanvas = ({
   const [showGrid, setShowGrid] = useState(false);
   const [gridSizeMultiplier, setGridSizeMultiplier] = useState(1);
   const [gridOffset, setGridOffset] = useState({ x: 0, y: 0 });
+  const [isTwoFingerTouch, setIsTwoFingerTouch] = useState(false);
+
+  // Touch gesture state refs (using refs to avoid stale closures in event handlers)
+  const lastTouchDistRef = useRef(null);
+  const lastTouchCenterRef = useRef(null);
+  const stageStateRef = useRef(stageState);
+  useEffect(() => {
+    stageStateRef.current = stageState;
+  }, [stageState]);
+
 
   // Sync prop changes
   useEffect(() => {
@@ -77,6 +87,106 @@ const FloorCanvas = ({
       window.removeEventListener('resize', updateSize);
     };
   }, []);
+
+  // ─── Touch Gesture Handlers (Pinch to Zoom + Single-Finger Pan) ────────────
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const getDistance = (t1, t2) => {
+      const dx = t1.clientX - t2.clientX;
+      const dy = t1.clientY - t2.clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    const getMidpoint = (t1, t2, rect) => ({
+      x: ((t1.clientX + t2.clientX) / 2) - rect.left,
+      y: ((t1.clientY + t2.clientY) / 2) - rect.top,
+    });
+
+    const handleTouchStart = (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        setIsTwoFingerTouch(true);
+        lastTouchDistRef.current = getDistance(e.touches[0], e.touches[1]);
+        const rect = el.getBoundingClientRect();
+        lastTouchCenterRef.current = getMidpoint(e.touches[0], e.touches[1], rect);
+      } else if (e.touches.length === 1) {
+        setIsTwoFingerTouch(false);
+        lastTouchCenterRef.current = {
+          x: e.touches[0].clientX - el.getBoundingClientRect().left,
+          y: e.touches[0].clientY - el.getBoundingClientRect().top,
+        };
+        lastTouchDistRef.current = null;
+      }
+    };
+
+    const handleTouchMove = (e) => {
+      if (e.touches.length === 2) {
+        // ─ Pinch Zoom ─
+        e.preventDefault();
+        const rect = el.getBoundingClientRect();
+        const newDist = getDistance(e.touches[0], e.touches[1]);
+        const newCenter = getMidpoint(e.touches[0], e.touches[1], rect);
+
+        if (lastTouchDistRef.current !== null) {
+          const ratio = newDist / lastTouchDistRef.current;
+          const current = stageStateRef.current;
+          const oldScale = current.scale;
+          let newScale = oldScale * ratio;
+          newScale = Math.max(0.1, Math.min(10, newScale));
+
+          // Zoom toward pinch center
+          const cx = newCenter.x;
+          const cy = newCenter.y;
+          const originX = (cx - current.x) / oldScale;
+          const originY = (cy - current.y) / oldScale;
+
+          // Also account for finger-pair panning
+          const panDx = newCenter.x - lastTouchCenterRef.current.x;
+          const panDy = newCenter.y - lastTouchCenterRef.current.y;
+
+          setStageState({
+            scale: newScale,
+            x: cx - originX * newScale + panDx,
+            y: cy - originY * newScale + panDy,
+          });
+        }
+
+        lastTouchDistRef.current = newDist;
+        lastTouchCenterRef.current = newCenter;
+
+      } else if (e.touches.length === 1 && lastTouchDistRef.current === null) {
+        // ─ Single-finger pan (only when NOT pinching) ─
+        // We let Konva's built-in draggable handle this
+      }
+    };
+
+    const handleTouchEnd = (e) => {
+      if (e.touches.length < 2) {
+        lastTouchDistRef.current = null;
+        setIsTwoFingerTouch(false);
+        if (e.touches.length === 1) {
+          const rect = el.getBoundingClientRect();
+          lastTouchCenterRef.current = {
+            x: e.touches[0].clientX - rect.left,
+            y: e.touches[0].clientY - rect.top,
+          };
+        }
+      }
+    };
+
+    el.addEventListener('touchstart', handleTouchStart, { passive: false });
+    el.addEventListener('touchmove', handleTouchMove, { passive: false });
+    el.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+    return () => {
+      el.removeEventListener('touchstart', handleTouchStart);
+      el.removeEventListener('touchmove', handleTouchMove);
+      el.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, []); // empty deps — reads stageState via ref
+
 
   // Fit image to screen initially
   useEffect(() => {
@@ -535,7 +645,7 @@ const FloorCanvas = ({
         width={dimensions.width}
         height={dimensions.height}
         onWheel={handleWheel}
-        draggable={!activeMobileSlotTemplate} // Disable stage panning while placing slot on mobile to prevent Konva touch drag freeze
+        draggable={!activeMobileSlotTemplate && !isTwoFingerTouch} // Disable Konva drag when pinching with 2 fingers
         x={stageState.x}
         y={stageState.y}
         scaleX={stageState.scale}

@@ -1308,7 +1308,7 @@ const DashboardPage = () => {
             </div>
 
             {confirmAssignItem.isCustom && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', background: 'var(--color-bg-secondary)', padding: '12px', borderRadius: '10px' }}>
+              <div className="mobile-grid-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', background: 'var(--color-bg-secondary)', padding: '12px', borderRadius: '10px' }}>
                 <div>
                   <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)' }}>
                     Nama Merk *
@@ -1497,7 +1497,7 @@ const DashboardPage = () => {
               </div>
             </div>
             
-            <div className="neu-inset" style={{ padding: '18px', borderRadius: '14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div className="neu-inset mobile-grid-1" style={{ padding: '18px', borderRadius: '14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
               <div style={{ background: 'rgba(255, 255, 255, 0.5)', padding: '12px 14px', borderRadius: '10px' }}>
                 <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.5px' }}>
                   ID TEMPAT (SLOT)
@@ -1569,7 +1569,7 @@ const DashboardPage = () => {
             {(selectedSlot?.category?.has_id || selectedEquipment?.category?.has_id || categories.find(c => c.id === selectedEquipment?.category_id)?.has_id) && (
               <div className="neu-inset" style={{ padding: '16px', borderRadius: '12px', marginTop: '16px' }}>
                 <p style={{ margin: '0 0 12px', fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text)' }}>Kondisi Aset</p>
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div className="mobile-col" style={{ display: 'flex', gap: '8px' }}>
                   <button 
                     onClick={() => handleUpdateEquipmentStatus(selectedEquipment.id, 'active')}
                     className="neu-raised-sm"

@@ -86,58 +86,29 @@ const HistoryPage = () => {
         return [];
       });
 
-      let localLogs = [];
-      try {
-        const saved = localStorage.getItem('spil_local_history_logs');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          // Filter out move logs from localStorage so local storage doesn't duplicate official DB move logs
-          localLogs = parsed.filter(l => l.action_type !== 'move');
-          localStorage.setItem('spil_local_history_logs', JSON.stringify(localLogs));
-        }
-      } catch (e) {}
-
       const backendLogs = Array.isArray(logsRes) ? logsRes : [];
-
-      // Combine and deduplicate strictly by (asset_id + slot_code + status) or log ID
-      const combined = [...localLogs, ...backendLogs];
-      const seenKeys = new Set();
-      
-      const mergedLogs = combined.filter(log => {
-        if (!log) return false;
-        const idKey = log.id ? `id_${log.id}` : null;
-        const attrKey = `${log.asset_id || ''}_${log.slot_code || ''}_${log.status || ''}`;
-        
-        if (idKey && seenKeys.has(idKey)) return false;
-        if (seenKeys.has(attrKey)) return false;
-        
-        if (idKey) seenKeys.add(idKey);
-        seenKeys.add(attrKey);
-        return true;
-      });
-
-      setLogs(mergedLogs);
+      setLogs(backendLogs);
       setCategories(Array.isArray(catsRes) ? catsRes : []);
 
-      // Load expired items from localStorage
+      // Load expired items from API (fetching available assets and filtering for expired)
       try {
-        const savedBrands = localStorage.getItem('spil_category_brands');
-        const map = savedBrands ? JSON.parse(savedBrands) : {};
+        const { getAssets } = await import('../api/inventory');
+        const assets = await getAssets('available');
+        
         let exItems = [];
-        Object.keys(map).forEach(key => {
-          // ensure we only process the key once if it's stored by both name and ID
-          const brands = map[key] || [];
-          brands.forEach(b => {
-            if (b.expired_date && !exItems.some(ex => ex.id === b.id)) {
+        if (assets && Array.isArray(assets)) {
+          assets.forEach(asset => {
+            if (asset.expired_date && !exItems.some(ex => ex.id === asset.id)) {
               exItems.push({
-                ...b,
-                category_name: (Array.isArray(catsRes) ? catsRes : []).find(c => c.id === key || c.name.toLowerCase() === key)?.name || key
+                ...asset,
+                category_name: asset.category?.name || 'Umum',
+                stock: 1 // Since it's from /assets, each represents 1 unit
               });
             }
           });
-        });
-        // Sort expired items by date closest to expiration
-        exItems.sort((a, b) => new Date(a.expired_date) - new Date(b.expired_date));
+          // Sort expired items by date closest to expiration
+          exItems.sort((a, b) => new Date(a.expired_date) - new Date(b.expired_date));
+        }
         setExpiredItems(exItems);
       } catch (e) {
         console.error("Error loading expired items:", e);

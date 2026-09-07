@@ -229,3 +229,36 @@ button:not(.neu-action-btn):not(.neu-raised-btn):active {
     display: none !important;
   }
 }
+
+/* Mobile Responsive Layout Utilities */
+@media (max-width: 768px) {
+  .mobile-col {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  
+  .mobile-w-full {
+    width: 100% !important;
+  }
+
+  .mobile-gap-sm {
+    gap: 8px !important;
+  }
+  
+  .mobile-grid-1 {
+    grid-template-columns: 1fr !important;
+  }
+  
+  .mobile-p-sm {
+    padding: 16px !important;
+  }
+  
+  .mobile-text-center {
+    text-align: center !important;
+    justify-content: center !important;
+  }
+  
+  .mobile-wrap {
+    flex-wrap: wrap !important;
+  }
+}

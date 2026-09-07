@@ -63,82 +63,25 @@ const InventoryPage = () => {
   const confirmDeleteBrandAction = async () => {
     if (!confirmDeleteBrand) return;
     const item = confirmDeleteBrand;
-    const catName = selectedCategoryView?.name || item.category_name || 'Item';
-    const catId = selectedCategoryView?.id || item.category_id;
-    const catColor = selectedCategoryView?.color || item.category_color || '#3b82f6';
-    const stockQty = parseInt(item.stock) || 1;
 
     try {
-      // 1. Remove brand item from spil_category_brands localStorage across ALL keys
-      const savedBrands = localStorage.getItem('spil_category_brands');
-      if (savedBrands) {
-        let map = JSON.parse(savedBrands);
-        Object.keys(map).forEach(key => {
-          if (Array.isArray(map[key])) {
-            map[key] = map[key].filter(b => {
-              const brandMatch = (b.brand || '').toLowerCase().trim() === (item.brand || '').toLowerCase().trim();
-              const modelMatch = (b.model_number || '').toLowerCase().trim() === (item.model_number || '').toLowerCase().trim();
-              const idMatch = b.id && item.id && String(b.id) === String(item.id);
-              return !(idMatch || (brandMatch && modelMatch));
-            });
-          }
-        });
-        localStorage.setItem('spil_category_brands', JSON.stringify(map));
+      // Find all available assets that match this brand's category, brand, and model
+      const assetsToDelete = availableAssets.filter(a => 
+        String(a.category_id) === String(item.category_id) && 
+        (a.brand || '').toLowerCase() === (item.brand || '').toLowerCase() &&
+        (a.model_number || '').toLowerCase() === (item.model_number || '').toLowerCase()
+      );
+      
+      // Delete them sequentially via API
+      for (const asset of assetsToDelete) {
+        try {
+          await deleteAsset(asset.id);
+        } catch (e) {
+          console.error("Failed to delete asset:", asset.id, e);
+        }
       }
 
-      // 2. Format batch asset ID string: e.g. "Lampu-1 -- 32" as requested by user
-      const assetIdLabel = stockQty > 1 
-        ? `${catName}-1 -- ${stockQty}` 
-        : `${catName}-1`;
-
-      // 3. Save log entry to both spil_local_history_logs and spil_local_logs
-      const newLog = {
-        id: 'log_' + Date.now(),
-        category_id: catId,
-        category_name: catName,
-        category: {
-          id: catId,
-          name: catName,
-          color: catColor
-        },
-        asset_id: assetIdLabel,
-        brand: item.brand,
-        model_number: item.model_number || 'Standard',
-        action_type: 'remove',
-        status: 'Dibuang / Dihapus (stok dibuang/dihapus)',
-        quantity: stockQty,
-        qty: stockQty,
-        building_name: '-',
-        floor_name: '-',
-        room_name: '-',
-        location_info: 'Gudang (Stok dibuang/dihapus)',
-        notes: '(stok dibuang/dihapus)',
-        created_at: new Date().toISOString()
-      };
-
-      try {
-        const savedHistory = localStorage.getItem('spil_local_history_logs');
-        const histLogs = savedHistory ? JSON.parse(savedHistory) : [];
-        histLogs.unshift(newLog);
-        localStorage.setItem('spil_local_history_logs', JSON.stringify(histLogs));
-      } catch (e) { console.error('History log save error:', e); }
-
-      try {
-        const savedLogs = localStorage.getItem('spil_local_logs');
-        const locLogs = savedLogs ? JSON.parse(savedLogs) : [];
-        locLogs.unshift(newLog);
-        localStorage.setItem('spil_local_logs', JSON.stringify(locLogs));
-      } catch (e) { console.error('Local log save error:', e); }
-
-      // 4. Directly update local state so card disappears immediately
-      setBrandInventory(prev => prev.filter(b => {
-        const brandMatch = (b.brand || '').toLowerCase().trim() === (item.brand || '').toLowerCase().trim();
-        const modelMatch = (b.model_number || '').toLowerCase().trim() === (item.model_number || '').toLowerCase().trim();
-        const idMatch = b.id && item.id && String(b.id) === String(item.id);
-        return !(idMatch || (brandMatch && modelMatch));
-      }));
-
-      showToast(`Merk ${item.brand} (${stockQty} unit) berhasil dibuang & dicatat dalam riwayat log`, 'success');
+      showToast(`Merk ${item.brand} berhasil dibuang & dicatat dalam riwayat log`, 'success');
       setConfirmDeleteBrand(null);
       await fetchData(false);
     } catch (err) {
@@ -174,58 +117,54 @@ const InventoryPage = () => {
       const cats = await getCategories();
       setCategories(cats);
       
-      // Load Good Inventory
-      const savedBrands = localStorage.getItem('spil_category_brands');
-      let flatBrands = [];
-      if (savedBrands) {
-        const map = JSON.parse(savedBrands);
-        cats.forEach(cat => {
-          const catKey = (cat.name || '').toLowerCase();
-          const brands = map[catKey] || map[cat.id] || [];
-          brands.forEach(b => {
-            if (b.expired_date) {
-              const days = getDaysToExpiration(b.expired_date);
-              if (days < 0) return; // exclude expired items from Siap Pakai
-            }
-            flatBrands.push({
-              ...b,
-              category_id: cat.id,
-              category_name: cat.name,
-              category_color: cat.color || '#3b82f6'
-            });
-          });
+      // Load Available Assets from Backend
+      const assets = await getAssets('available');
+      setAvailableAssets(assets || []);
+      
+      // Group available assets into brandInventory format
+      let map = {};
+      if (assets && Array.isArray(assets)) {
+        assets.forEach(asset => {
+          const key = `${asset.category_id}_${(asset.brand || 'Tanpa Merk').toLowerCase()}_${(asset.model_number || 'Standard').toLowerCase()}`;
+          if (!map[key]) {
+            map[key] = {
+              id: `b_${asset.category_id}_${asset.brand}_${asset.model_number}`,
+              category_id: asset.category_id,
+              category_name: asset.category?.name || 'Umum',
+              category_color: asset.category?.color || '#3b82f6',
+              brand: asset.brand || 'Tanpa Merk',
+              model_number: asset.model_number || 'Standard',
+              stock: 0,
+              min_stock: 1, // default or backend value
+              warranty_months: 0,
+              purchase_date: null,
+              expired_date: null
+            };
+          }
+          map[key].stock += 1;
         });
       }
-      setBrandInventory(flatBrands);
+      setBrandInventory(Object.values(map));
 
-      // Load Damaged Inventory
-      const savedDamaged = localStorage.getItem('spil_damaged_inventory');
-      let localDamaged = savedDamaged ? JSON.parse(savedDamaged) : [];
-
+      // Load Damaged Inventory from Backend
+      let localDamaged = [];
       try {
         const damagedAssets = await getAssets('damaged');
         if (damagedAssets && Array.isArray(damagedAssets)) {
-          const apiDamaged = damagedAssets.map(a => ({
+          localDamaged = damagedAssets.map(a => ({
             id: a.id,
             asset_id: a.asset_id || a.name || `AST-${a.id}`,
             brand: a.brand || 'Tanpa Merk',
             model_number: a.model_number || 'Standard',
             category_id: a.category_id,
-            category_name: a.category_name || 'Umum',
+            category_name: a.category?.name || 'Umum',
+            category_color: a.category?.color || '#3b82f6',
             unassigned_at: a.updated_at || a.created_at || new Date().toISOString()
           }));
-          
-          const existingIds = new Set(localDamaged.map(d => String(d.asset_id || d.id)));
-          apiDamaged.forEach(ad => {
-            if (!existingIds.has(String(ad.asset_id)) && !existingIds.has(String(ad.id))) {
-              localDamaged.push(ad);
-            }
-          });
         }
       } catch (err) {
         console.log("Could not fetch API damaged assets:", err);
       }
-
       setDamagedInventory(localDamaged);
       
       // Load Active Equipments
@@ -235,10 +174,6 @@ const InventoryPage = () => {
       // Load History Logs
       const logs = await getInventoryLogs();
       setInventoryLogs(logs || []);
-      
-      // Load Available Assets
-      const assets = await getAssets('available');
-      setAvailableAssets(assets || []);
       
     } catch (e) {
       console.error(e);
@@ -350,66 +285,15 @@ const InventoryPage = () => {
     }
 
     try {
-      const saved = localStorage.getItem('spil_category_brands');
-      let map = saved ? JSON.parse(saved) : {};
-
-      const catKey = (selectedCategoryView.name || '').toLowerCase();
-      const catId = selectedCategoryView.id;
-      const currentBrands = map[catKey] || map[catId] || [];
-
-      const newBrandItem = {
-        id: 'b_' + Date.now(),
+      const stock = parseInt(brandForm.stock) || 1;
+      await addStockToInventory({
+        category_id: selectedCategoryView.id,
         brand: brandForm.brand.trim(),
         model_number: brandForm.model_number.trim() || 'Standard',
-        stock: parseInt(brandForm.stock) || 0,
-        min_stock: parseInt(brandForm.min_stock) || 0,
-        warranty_months: parseInt(brandForm.warranty_months) || 0,
-        purchase_date: brandForm.purchase_date || null,
-        expired_date: brandForm.expired_date || null
-      };
+        quantity: stock
+      });
 
-      const updatedBrands = [...currentBrands, newBrandItem];
-      map[catKey] = updatedBrands;
-      if (catId) map[catId] = updatedBrands;
-
-      localStorage.setItem('spil_category_brands', JSON.stringify(map));
-
-      // Record Activity Log for adding new stock item
-      if (newBrandItem.stock > 0) {
-        let apiSuccess = false;
-        try {
-          await addStockToInventory({
-            category_id: selectedCategoryView.id,
-            brand: newBrandItem.brand,
-            model_number: newBrandItem.model_number,
-            quantity: newBrandItem.stock
-          });
-          apiSuccess = true;
-        } catch (apiErr) {
-          console.log("Backend API addStock notice:", apiErr);
-        }
-
-        if (!apiSuccess) {
-          const savedLogs = localStorage.getItem('spil_local_logs');
-          const localLogs = savedLogs ? JSON.parse(savedLogs) : [];
-          localLogs.unshift({
-            id: 'log_' + Date.now(),
-            category_id: selectedCategoryView.id,
-            category_name: selectedCategoryView.name,
-            category: { id: selectedCategoryView.id, name: selectedCategoryView.name },
-            brand: newBrandItem.brand,
-            model_number: newBrandItem.model_number,
-            action_type: 'add_stock',
-            quantity: newBrandItem.stock,
-            status: 'Siap Pakai',
-            location_info: `Stok Masuk Gudang (${selectedCategoryView.name})`,
-            created_at: new Date().toISOString()
-          });
-          localStorage.setItem('spil_local_logs', JSON.stringify(localLogs));
-        }
-      }
-
-      showToast(`Berhasil menambah barang ${newBrandItem.brand}!`, 'success');
+      showToast(`Berhasil menambah barang ${brandForm.brand.trim()}!`, 'success');
       setShowAddBrandModal(false);
       fetchData(false);
     } catch (err) {
@@ -425,57 +309,13 @@ const InventoryPage = () => {
     if (!addStockModal || stockToAdd <= 0) return;
     
     try {
-      let apiSuccess = false;
-      try {
-        await addStockToInventory({
-          category_id: addStockModal.category_id,
-          brand: addStockModal.brand,
-          model_number: addStockModal.model_number || 'Standard',
-          quantity: parseInt(stockToAdd)
-        });
-        apiSuccess = true;
-      } catch (apiErr) {
-        console.log("API add stock notice:", apiErr);
-      }
+      await addStockToInventory({
+        category_id: addStockModal.category_id,
+        brand: addStockModal.brand,
+        model_number: addStockModal.model_number || 'Standard',
+        quantity: parseInt(stockToAdd)
+      });
       
-      const saved = localStorage.getItem('spil_category_brands');
-      if (saved) {
-        const map = JSON.parse(saved);
-        const catKey = (addStockModal.category_name || '').toLowerCase();
-        const catBrands = map[catKey] || map[addStockModal.category_id] || [];
-        
-        const updatedBrands = catBrands.map(b => {
-          if (b.id === addStockModal.id || (b.brand === addStockModal.brand && b.model_number === addStockModal.model_number)) {
-            return { ...b, stock: (parseInt(b.stock) || 0) + parseInt(stockToAdd) };
-          }
-          return b;
-        });
-        
-        map[catKey] = updatedBrands;
-        if (addStockModal.category_id) map[addStockModal.category_id] = updatedBrands;
-        localStorage.setItem('spil_category_brands', JSON.stringify(map));
-      }
-
-      // Record Activity Log into spil_local_logs ONLY if API did not record it
-      if (!apiSuccess) {
-        const savedLogs = localStorage.getItem('spil_local_logs');
-        const localLogs = savedLogs ? JSON.parse(savedLogs) : [];
-        localLogs.unshift({
-          id: 'log_' + Date.now(),
-          category_id: addStockModal.category_id,
-          category_name: addStockModal.category_name,
-          category: { id: addStockModal.category_id, name: addStockModal.category_name },
-          brand: addStockModal.brand,
-          model_number: addStockModal.model_number || 'Standard',
-          action_type: 'add_stock',
-          quantity: parseInt(stockToAdd),
-          status: 'Siap Pakai',
-          location_info: `Stok Masuk Gudang (${addStockModal.category_name || 'Siap Pakai'})`,
-          created_at: new Date().toISOString()
-        });
-        localStorage.setItem('spil_local_logs', JSON.stringify(localLogs));
-      }
-
       showToast(`Berhasil menambah ${stockToAdd} stok untuk ${addStockModal.brand}`, 'success');
       setAddStockModal(null);
       setStockToAdd(1);
@@ -488,71 +328,12 @@ const InventoryPage = () => {
 
   const handleRestoreDamaged = async (item) => {
     try {
-      // Call backend API to restore asset status to available and increment category stock
-      try {
-        await restoreAsset({
-          asset_id: item.asset_id || item.id || 'Asset',
-          category_id: item.category_id,
-          brand: item.brand,
-          model_number: item.model_number
-        });
-      } catch (err) {
-        console.log('Backend restore endpoint error:', err);
-      }
-
-      const savedBrands = localStorage.getItem('spil_category_brands');
-      let map = savedBrands ? JSON.parse(savedBrands) : {};
-      const catKey = (item.category_name || '').toLowerCase();
-      let catBrands = map[catKey] || map[item.category_id] || [];
-      
-      let found = false;
-      const updatedBrands = catBrands.map(b => {
-        if ((b.brand || '').toLowerCase() === (item.brand || '').toLowerCase() && (b.model_number || '').toLowerCase() === (item.model_number || '').toLowerCase()) {
-          found = true;
-          return { ...b, stock: (parseInt(b.stock) || 0) + 1 };
-        }
-        return b;
+      await restoreAsset({
+        asset_id: item.asset_id || item.id,
+        category_id: item.category_id,
+        brand: item.brand,
+        model_number: item.model_number
       });
-      
-      if (!found && item.brand) {
-        updatedBrands.push({
-          id: 'b_' + Date.now(),
-          brand: item.brand,
-          model_number: item.model_number || 'Standard',
-          stock: 1,
-          min_stock: 1,
-          warranty_months: 0
-        });
-      }
-      
-      map[catKey] = updatedBrands;
-      if (item.category_id) map[item.category_id] = updatedBrands;
-      localStorage.setItem('spil_category_brands', JSON.stringify(map));
-      
-      const newDamaged = damagedInventory.filter(d => d.id !== item.id && d.asset_id !== item.asset_id);
-      localStorage.setItem('spil_damaged_inventory', JSON.stringify(newDamaged));
-      
-      // Save history log entry for repair
-      try {
-        const savedLogs = localStorage.getItem('spil_local_history_logs');
-        const localLogs = savedLogs ? JSON.parse(savedLogs) : [];
-        localLogs.unshift({
-          id: 'log_' + Date.now(),
-          category_id: item.category_id,
-          category: { id: item.category_id, name: item.category_name, color: item.category_color || '#3a9542' },
-          asset_id: item.asset_id || item.brand || 'Item',
-          brand: item.brand,
-          model_number: item.model_number,
-          action_type: 'repair',
-          status: 'Siap Pakai (Hasil Perbaikan)',
-          building_name: item.building_name || 'Gudang Utama',
-          floor_name: item.floor_name || '-',
-          room_name: item.room_name || '-',
-          location_info: `Diperbaiki dari Gudang Rusak (${item.asset_id || item.brand}) -> Kembali ke Stok Siap Pakai`,
-          created_at: new Date().toISOString()
-        });
-        localStorage.setItem('spil_local_history_logs', JSON.stringify(localLogs));
-      } catch (e) { console.error('Local history log save error:', e); }
 
       showToast('Barang berhasil diperbaiki & masuk ke Siap Pakai', 'success');
       await fetchData(false);
@@ -562,34 +343,11 @@ const InventoryPage = () => {
     }
   };
 
-  const handleDeleteDamagedConfirm = () => {
+  const handleDeleteDamagedConfirm = async () => {
     if (!confirmDeleteDamaged) return;
     try {
       const item = confirmDeleteDamaged;
-      const newDamaged = damagedInventory.filter(d => d.id !== item.id);
-      localStorage.setItem('spil_damaged_inventory', JSON.stringify(newDamaged));
-
-      // Save history log entry for discarded asset
-      try {
-        const savedLogs = localStorage.getItem('spil_local_history_logs');
-        const localLogs = savedLogs ? JSON.parse(savedLogs) : [];
-        localLogs.unshift({
-          id: 'log_' + Date.now(),
-          category_id: item.category_id,
-          category: { id: item.category_id, name: item.category_name, color: item.category_color || '#3a9542' },
-          asset_id: item.asset_id || item.brand || 'Item',
-          brand: item.brand,
-          model_number: item.model_number,
-          action_type: 'remove',
-          status: 'Dibuang / Off',
-          building_name: item.building_name || 'Gudang Utama',
-          floor_name: item.floor_name || '-',
-          room_name: item.room_name || '-',
-          location_info: `Dibuang permanen dari Gudang Rusak (${item.asset_id || item.brand})`,
-          created_at: new Date().toISOString()
-        });
-        localStorage.setItem('spil_local_history_logs', JSON.stringify(localLogs));
-      } catch (e) { console.error('Local history log save error:', e); }
+      await deleteAsset(item.id);
 
       showToast('Barang rusak berhasil dibuang', 'success');
       setConfirmDeleteDamaged(null);
@@ -627,7 +385,7 @@ const InventoryPage = () => {
   }
 
   return (
-    <div style={{ padding: '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
+    <div className="mobile-p-sm" style={{ padding: '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
       {/* Header (Centered Title with Spacious Layout) */}
       <div style={{ marginBottom: '32px' }}>
         <button 
@@ -663,9 +421,10 @@ const InventoryPage = () => {
       </div>
 
       {/* Action Row: Tabs (Left) & Search + Tambah Kategori (Right, Sejajar) */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
-        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="mobile-col" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+        <div className="mobile-col mobile-w-full" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
           <button 
+            className="mobile-w-full mobile-text-center"
             onClick={() => { setActiveTab('good'); setSelectedCategoryView(null); }}
             style={{
               padding: '12px 24px',
@@ -688,6 +447,7 @@ const InventoryPage = () => {
           </button>
 
           <button 
+            className="mobile-w-full mobile-text-center"
             onClick={() => { setActiveTab('damaged'); setSelectedCategoryView(null); }}
             style={{
               padding: '12px 24px',
@@ -711,8 +471,8 @@ const InventoryPage = () => {
         </div>
 
         {/* Right Side: Search Input + Tambah Kategori Button (Sejajar & Rata Tengah Vertikal) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', padding: '0 14px', borderRadius: '12px', background: '#ffffff', border: '1.5px solid #cbd5e1', width: '280px', height: '44px', boxSizing: 'border-box', boxShadow: '0 2px 6px rgba(0,0,0,0.04)' }}>
+        <div className="mobile-col mobile-w-full" style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <div className="mobile-w-full" style={{ display: 'flex', alignItems: 'center', padding: '0 14px', borderRadius: '12px', background: '#ffffff', border: '1.5px solid #cbd5e1', width: '280px', height: '44px', boxSizing: 'border-box', boxShadow: '0 2px 6px rgba(0,0,0,0.04)' }}>
             <Search size={18} color="#64748b" style={{ marginRight: '8px', flexShrink: 0 }} />
             <input 
               type="text"
@@ -726,7 +486,7 @@ const InventoryPage = () => {
           {(activeTab === 'good' && !selectedCategoryView) && (
             <button
               onClick={handleOpenAddCategoryModal}
-              className="neu-action-btn"
+              className="neu-action-btn mobile-w-full mobile-text-center"
               style={{
                 height: '44px',
                 padding: '0 22px',
@@ -752,13 +512,13 @@ const InventoryPage = () => {
       </div>
 
       {/* Content Area */}
-      <div className="neu-inset" style={{ padding: '24px', borderRadius: '18px', background: 'rgba(255,255,255,0.6)', border: '1px solid #e2e8f0', minHeight: '400px' }}>
+      <div className="neu-inset mobile-p-sm" style={{ padding: '24px', borderRadius: '18px', background: 'rgba(255,255,255,0.6)', border: '1px solid #e2e8f0', minHeight: '400px' }}>
         
         {(activeTab === 'category' || activeTab === 'good') && (
           <div>
             {!selectedCategoryView ? (
               // CATEGORY GRID VIEW (Bold, Crisp & Prominent!)
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: '20px' }}>
+              <div className="mobile-grid-1" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: '20px' }}>
                 {categories.map(cat => {
                   const catBrands = brandInventory.filter(b => String(b.category_id) === String(cat.id) || (b.category_name || '').toLowerCase() === (cat.name || '').toLowerCase());
                   const totalStock = catBrands.reduce((acc, b) => acc + (parseInt(b.stock) || 0), 0);
