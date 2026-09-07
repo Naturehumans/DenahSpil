@@ -113,6 +113,7 @@ async def add_stock(data: dict, db: AsyncSession = Depends(get_db), current_user
 
     # Fetch category
     from app.models.equipment_category import EquipmentCategory
+    from app.utils.asset_id_generator import get_next_asset_ids
     cat_res = await db.execute(select(EquipmentCategory).where(EquipmentCategory.id == category_id))
     cat = cat_res.scalars().first()
     
@@ -121,30 +122,36 @@ async def add_stock(data: dict, db: AsyncSession = Depends(get_db), current_user
 
     cat_name = cat.name
 
-    for _ in range(quantity):
+    # Generate sequential structured IDs
+    new_asset_ids = await get_next_asset_ids(cat_name, brand, model_number, db, category_id, quantity)
+
+    for i in range(quantity):
+        asset_id = new_asset_ids[i]
+        
         asset_inv = AssetInventory(
             category_id=category_id,
-            asset_id=f"{cat_name} - {brand}",
+            asset_id=asset_id,
             status='available',
             brand=brand,
             model_number=model_number
         )
         db.add(asset_inv)
 
-    log = InventoryHistoryLog(
-        category_id=category_id,
-        asset_id=f"{cat_name} - {brand}",
-        action_type='add_stock',
-        building_name="Gudang Utama",
-        floor_name="-",
-        room_name="-",
-        brand=brand,
-        model_number=model_number,
-        status="Siap Pakai",
-        location_info=f"Stok Masuk Gudang ({cat_name})",
-        performed_by=current_user.id
-    )
-    db.add(log)
+        log = InventoryHistoryLog(
+            category_id=category_id,
+            asset_id=asset_id,
+            action_type='add_stock',
+            building_name="Gudang Utama",
+            floor_name="-",
+            room_name="-",
+            brand=brand,
+            model_number=model_number,
+            status="Siap Pakai",
+            location_info=f"Stok Masuk Gudang ({cat_name})",
+            performed_by=current_user.id
+        )
+        db.add(log)
+        
     await db.commit()
     return {"success": True}
 

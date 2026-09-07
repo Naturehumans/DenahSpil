@@ -171,25 +171,155 @@ const FloorCanvas = ({
   };
 
   const handlePrint = () => {
-    // Basic print implementation: get dataURL and open in new window to print
     if (!stageRef.current) return;
     const dataUrl = stageRef.current.toDataURL({ pixelRatio: 2 });
+    
+    // Calculate Summary and Table Rows
+    const totalSlots = slots.length;
+    let installedSlots = 0;
+    let uninstalledSlots = 0;
+
+    const tableRows = slots.map(slot => {
+      const isInstalled = !!slot.equipment;
+      if (isInstalled) installedSlots++;
+      else uninstalledSlots++;
+      
+      const idTempat = slot.slot_code || slot.id;
+      const kategori = slot.category?.name || '-';
+      const idBarang = slot.equipment?.asset_id || '-';
+      const merkType = isInstalled 
+        ? `${slot.equipment.brand || ''} ${slot.equipment.model_number || ''}`.trim() || '-'
+        : '-';
+      let kondisi = isInstalled ? (slot.equipment.status || 'Aktif') : 'Belum Terpasang (Kosong)';
+      
+      if (kondisi.toLowerCase() === 'available' || kondisi.toLowerCase() === 'aktif') kondisi = 'Siap Pakai / Aktif';
+      else if (kondisi.toLowerCase() === 'damaged') kondisi = 'Perlu Cek / Rusak';
+
+      const lokasi = slot.room_name || slot.location_info || '-';
+
+      return `
+        <tr>
+          <td>${idTempat}</td>
+          <td>${kategori}</td>
+          <td>${lokasi}</td>
+          <td>${idBarang}</td>
+          <td>${merkType}</td>
+          <td style="color: ${isInstalled ? 'inherit' : '#dc2626'}; font-weight: ${isInstalled ? 'normal' : 'bold'}">${kondisi}</td>
+        </tr>
+      `;
+    }).join('');
+
     const printWindow = window.open('', '_blank');
     printWindow.document.write(`
       <html>
         <head>
           <title>Print Floor Plan</title>
           <style>
-            body { margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+            body { 
+              margin: 0; 
+              font-family: 'Segoe UI', Arial, sans-serif;
+              color: #1e293b;
+            }
+            .image-container {
+              display: flex; 
+              justify-content: center; 
+              align-items: center; 
+              min-height: 100vh;
+              page-break-after: always;
+            }
             img { max-width: 100%; max-height: 100vh; object-fit: contain; }
+            
+            .details-page {
+              padding: 40px;
+            }
+            h2 { border-bottom: 2px solid #3a9542; padding-bottom: 12px; color: #0f172a; margin-top: 0; }
+            
+            .summary {
+              display: flex;
+              gap: 20px;
+              margin-bottom: 30px;
+              page-break-inside: avoid;
+            }
+            .summary-box {
+              background: #f8fafc;
+              border: 1px solid #e2e8f0;
+              padding: 16px 20px;
+              border-radius: 8px;
+              flex: 1;
+              text-align: center;
+            }
+            .summary-box h3 { margin: 0 0 8px; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+            .summary-box p { margin: 0; font-size: 28px; font-weight: 800; color: #0f172a; }
+            
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 20px;
+              font-size: 13px;
+            }
+            th, td {
+              border: 1px solid #cbd5e1;
+              padding: 12px;
+              text-align: left;
+            }
+            th {
+              background: #3a9542;
+              color: white;
+              font-weight: 600;
+            }
+            tr:nth-child(even) {
+              background-color: #f8fafc;
+            }
+
             @media print {
-              @page { size: landscape; margin: 0; }
+              @page { size: landscape; margin: 10mm; }
               body { margin: 0; }
+              .image-container { height: 100vh; }
+              table { page-break-inside: auto; }
+              tr { page-break-inside: avoid; page-break-after: auto; }
+              thead { display: table-header-group; }
             }
           </style>
         </head>
         <body>
-          <img src="${dataUrl}" onload="window.print(); window.close();" />
+          <div class="image-container">
+            <img src="${dataUrl}" onload="window.print(); window.close();" />
+          </div>
+          
+          <div class="details-page">
+            <h2>Ringkasan Denah & Detail Barang</h2>
+            
+            <div class="summary">
+              <div class="summary-box">
+                <h3>Total Titik / Slot</h3>
+                <p>${totalSlots}</p>
+              </div>
+              <div class="summary-box" style="border-color: #bbf7d0; background: #f0fdf4;">
+                <h3 style="color: #166534;">Sudah Terpasang</h3>
+                <p style="color: #15803d;">${installedSlots}</p>
+              </div>
+              <div class="summary-box" style="border-color: #fecaca; background: #fef2f2;">
+                <h3 style="color: #991b1b;">Belum Terpasang (Kosong)</h3>
+                <p style="color: #dc2626;">${uninstalledSlots}</p>
+              </div>
+            </div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>ID Tempat</th>
+                  <th>Kategori</th>
+                  <th>Lokasi Ruang</th>
+                  <th>ID Barang (Aset)</th>
+                  <th>Merk & Tipe</th>
+                  <th>Kondisi / Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${tableRows}
+              </tbody>
+            </table>
+          </div>
         </body>
       </html>
     `);

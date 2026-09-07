@@ -197,36 +197,10 @@ async def assign_equipment_to_slot(
         auto_name = avail_asset.asset_id
         avail_asset.status = 'in_use'
     else:
-        # 2. If no AssetInventory item exists, generate auto_name strictly incrementing MAX ID number ever recorded
-        import re
-        all_names = []
-
-        # Check Equipment table
-        eqs_res = await db.execute(select(Equipment.name).where(Equipment.category_id == cat.id))
-        all_names.extend([n for n in eqs_res.scalars().all() if n])
-
-        # Check AssetInventory table
-        assets_res = await db.execute(select(AssetInventory.asset_id).where(AssetInventory.category_id == cat.id))
-        all_names.extend([n for n in assets_res.scalars().all() if n])
-
-        # Check InventoryHistoryLog table (includes all deleted, discarded, deployed items)
-        hist_res = await db.execute(
-            select(InventoryHistoryLog.asset_id)
-            .where(InventoryHistoryLog.category_id == cat.id)
-            .where(InventoryHistoryLog.asset_id.isnot(None))
-        )
-        all_names.extend([n for n in hist_res.scalars().all() if n])
-
-        max_num = 0
-        for n in all_names:
-            match = re.search(r'(\d+)$', n.strip())
-            if match:
-                num = int(match.group(1))
-                if num > max_num:
-                    max_num = num
-
-        candidate = max_num + 1
-        auto_name = f"{cat.name} - {candidate}"
+        # 2. If no AssetInventory item exists, generate auto_name using the structured format
+        from app.utils.asset_id_generator import get_next_asset_ids
+        new_ids = await get_next_asset_ids(cat.name, brand, model_number, db, cat.id, 1)
+        auto_name = new_ids[0]
 
     if not slot.slot_code:
         slot_count_res = await db.execute(
