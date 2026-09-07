@@ -319,57 +319,67 @@ const FloorCanvas = ({
       `;
     }).join('');
 
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
+    const htmlContent = `
+      <!DOCTYPE html>
       <html>
         <head>
-          <title>Print Floor Plan</title>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>Print Denah</title>
           <style>
+            * { box-sizing: border-box; }
             body { 
               margin: 0; 
+              padding: 0;
               font-family: 'Segoe UI', Arial, sans-serif;
               color: #1e293b;
             }
-            .image-container {
-              display: flex; 
-              justify-content: center; 
-              align-items: center; 
-              min-height: 100vh;
-              page-break-after: always;
+
+            /* ── Section 1: Denah Image (Landscape) ── */
+            .image-section {
+              width: 100%;
+              padding: 8px;
+              page: landscape-page;
+              break-after: page;
             }
-            img { max-width: 100%; max-height: 100vh; object-fit: contain; }
-            
+            .image-section img { 
+              width: 100%;
+              height: auto;
+              display: block;
+              object-fit: contain;
+            }
+
+            /* ── Section 2: Data Table (Portrait) ── */
             .details-page {
-              padding: 40px;
+              padding: 16px;
+              page: portrait-page;
             }
-            h2 { border-bottom: 2px solid #3a9542; padding-bottom: 12px; color: #0f172a; margin-top: 0; }
-            
+            h2 { border-bottom: 2px solid #3a9542; padding-bottom: 10px; color: #0f172a; margin-top: 0; font-size: 16px; }
             .summary {
               display: flex;
-              gap: 20px;
-              margin-bottom: 30px;
-              page-break-inside: avoid;
+              flex-wrap: wrap;
+              gap: 10px;
+              margin-bottom: 20px;
             }
             .summary-box {
               background: #f8fafc;
               border: 1px solid #e2e8f0;
-              padding: 16px 20px;
+              padding: 12px 14px;
               border-radius: 8px;
-              flex: 1;
+              flex: 1 1 80px;
               text-align: center;
             }
-            .summary-box h3 { margin: 0 0 8px; font-size: 14px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-            .summary-box p { margin: 0; font-size: 28px; font-weight: 800; color: #0f172a; }
-            
+            .summary-box h3 { margin: 0 0 4px; font-size: 11px; color: #64748b; font-weight: 600; text-transform: uppercase; }
+            .summary-box p { margin: 0; font-size: 22px; font-weight: 800; color: #0f172a; }
             table {
               width: 100%;
               border-collapse: collapse;
-              margin-top: 20px;
-              font-size: 13px;
+              margin-top: 12px;
+              font-size: 11px;
             }
             th, td {
               border: 1px solid #cbd5e1;
-              padding: 12px;
+              padding: 7px 8px;
               text-align: left;
             }
             th {
@@ -377,14 +387,21 @@ const FloorCanvas = ({
               color: white;
               font-weight: 600;
             }
-            tr:nth-child(even) {
-              background-color: #f8fafc;
-            }
+            tr:nth-child(even) { background-color: #f8fafc; }
 
             @media print {
-              @page { size: landscape; margin: 10mm; }
+              /* Named page for the denah image → Landscape */
+              @page landscape-page {
+                size: landscape;
+                margin: 6mm;
+              }
+              /* Named page for the data table → Portrait */
+              @page portrait-page {
+                size: portrait;
+                margin: 10mm;
+              }
               body { margin: 0; }
-              .image-container { height: 100vh; }
+              .image-section { padding: 0; }
               table { page-break-inside: auto; }
               tr { page-break-inside: avoid; page-break-after: auto; }
               thead { display: table-header-group; }
@@ -392,48 +409,63 @@ const FloorCanvas = ({
           </style>
         </head>
         <body>
-          <div class="image-container">
-            <img src="${dataUrl}" onload="window.print(); window.close();" />
+          <div class="image-section">
+            <img src="${dataUrl}" />
           </div>
-          
           <div class="details-page">
-            <h2>Ringkasan Denah & Detail Barang</h2>
-            
+            <h2>Ringkasan Denah &amp; Detail Barang</h2>
             <div class="summary">
               <div class="summary-box">
-                <h3>Total Titik / Slot</h3>
+                <h3>Total Titik</h3>
                 <p>${totalSlots}</p>
               </div>
               <div class="summary-box" style="border-color: #bbf7d0; background: #f0fdf4;">
-                <h3 style="color: #166534;">Sudah Terpasang</h3>
+                <h3 style="color: #166534;">Terpasang</h3>
                 <p style="color: #15803d;">${installedSlots}</p>
               </div>
               <div class="summary-box" style="border-color: #fecaca; background: #fef2f2;">
-                <h3 style="color: #991b1b;">Belum Terpasang (Kosong)</h3>
+                <h3 style="color: #991b1b;">Kosong</h3>
                 <p style="color: #dc2626;">${uninstalledSlots}</p>
               </div>
             </div>
-
             <table>
               <thead>
                 <tr>
                   <th>ID Tempat</th>
                   <th>Kategori</th>
                   <th>Lokasi Ruang</th>
-                  <th>ID Barang (Aset)</th>
-                  <th>Merk & Tipe</th>
-                  <th>Kondisi / Status</th>
+                  <th>ID Barang</th>
+                  <th>Merk &amp; Tipe</th>
+                  <th>Kondisi</th>
                 </tr>
               </thead>
-              <tbody>
-                ${tableRows}
-              </tbody>
+              <tbody>${tableRows}</tbody>
             </table>
           </div>
+          <script>window.onload = function() { window.print(); };<\/script>
         </body>
       </html>
-    `);
-    printWindow.document.close();
+    `;
+
+    // Remove any existing print iframe
+    const existing = document.getElementById('spil-print-frame');
+    if (existing) existing.remove();
+
+    // Create a hidden iframe in the current page
+    const iframe = document.createElement('iframe');
+    iframe.id = 'spil-print-frame';
+    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:100%;height:100%;border:none;opacity:0;pointer-events:none;';
+    document.body.appendChild(iframe);
+
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+    iframeDoc.open();
+    iframeDoc.write(htmlContent);
+    iframeDoc.close();
+
+    // Clean up iframe after printing is dismissed
+    iframe.contentWindow.addEventListener('afterprint', () => {
+      iframe.remove();
+    });
   };
 
   const handleStageClick = (e) => {
