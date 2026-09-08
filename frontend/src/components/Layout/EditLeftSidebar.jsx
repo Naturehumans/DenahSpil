@@ -46,17 +46,6 @@ const EditLeftSidebar = ({ isOpen, onClose, categories = [] }) => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
         {categories.map(cat => {
           let availableStock = cat.available_stock;
-          try {
-            const saved = localStorage.getItem('spil_category_brands');
-            if (saved) {
-              const map = JSON.parse(saved);
-              const catKey = (cat.name || '').toLowerCase();
-              const brands = map[catKey] || map[cat.id] || [];
-              if (Array.isArray(brands) && brands.length > 0) {
-                availableStock = brands.reduce((sum, b) => sum + (parseInt(b.stock) || 0), 0);
-              }
-            }
-          } catch (e) {}
           if (availableStock === undefined || availableStock === null) {
             availableStock = cat.initial_stock || 0;
           }

@@ -15,12 +15,22 @@ router = APIRouter()
 
 @router.get("", response_model=List[CategoryResponse])
 async def list_categories(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    from app.models.asset_inventory import AssetInventory
+    from sqlalchemy import func
+    
     stmt = select(EquipmentCategory).order_by(EquipmentCategory.name)
     result = await db.execute(stmt)
     
     categories = []
     for cat in result.scalars().all():
-        setattr(cat, "available_stock", cat.initial_stock)
+        count_stmt = select(func.count(AssetInventory.id)).where(
+            AssetInventory.category_id == cat.id, 
+            AssetInventory.status == 'available'
+        )
+        c_res = await db.execute(count_stmt)
+        asset_count = c_res.scalar() or 0
+        
+        setattr(cat, "available_stock", cat.initial_stock + asset_count)
         categories.append(cat)
         
     return categories

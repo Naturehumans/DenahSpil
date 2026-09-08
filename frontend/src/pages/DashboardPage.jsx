@@ -581,6 +581,21 @@ const DashboardPage = () => {
       );
 
       if (targetSlot) {
+        // Optimistic update
+        setSlots(prev => prev.map(s => {
+          if (s.id === targetSlot.id) {
+            return {
+              ...s,
+              equipment_id: sourceSlot.equipment_id,
+              equipment: sourceSlot.equipment
+            };
+          }
+          if (s.id === sourceSlot.id) {
+            return { ...s, equipment_id: null, equipment: null };
+          }
+          return s;
+        }));
+
         try {
           const updatedTargetSlot = await moveItemBetweenSlots(sourceSlot.id, targetSlot.id);
           
@@ -593,9 +608,6 @@ const DashboardPage = () => {
                 equipment: updatedTargetSlot.equipment || sourceSlot.equipment
               };
             }
-            if (s.id === sourceSlot.id) {
-              return { ...s, equipment_id: null, equipment: null };
-            }
             return s;
           }));
 
@@ -607,19 +619,24 @@ const DashboardPage = () => {
         } catch (err) {
           console.error("Error moving item between slots:", err);
           showToast(err.response?.data?.detail || 'Gagal memindahkan produk ke slot tujuan', 'error');
+          // Revert optimistic update
+          setSlots([...slots]);
         }
+      } else {
+        // If filled slot didn't hit a valid target slot, snap back
+        setSlots([...slots]);
       }
-      // If filled slot didn't hit a valid target slot, snap back
-      setSlots([...slots]);
     } else {
-      // Moving empty slot position on floorplan
+      // Optimistic update for moving empty slot position on floorplan
+      setSlots(prev => prev.map(s => s.id === id ? { ...s, position_x: Math.round(x), position_y: Math.round(y) } : s));
       try {
         await updateSlotPosition(id, Math.round(x), Math.round(y));
-        setSlots(prev => prev.map(s => s.id === id ? { ...s, position_x: Math.round(x), position_y: Math.round(y) } : s));
         showToast('Posisi slot berhasil diperbarui', 'success');
       } catch (err) {
         console.error("Error updating slot position:", err);
+        // Revert optimistic update
         setSlots([...slots]);
+        showToast('Gagal memperbarui posisi slot', 'error');
       }
     }
   };
@@ -680,10 +697,16 @@ const DashboardPage = () => {
     }
   };
 
-  const handleCloseModal = () => {
+  const handleCloseModal = async () => {
     setActiveModal(null);
     setSelectedSlot(null);
     setUnassignDate('');
+    try {
+      const cats = await getCategories();
+      setCategories(cats);
+    } catch (error) {
+      console.error("Failed to refetch categories after closing modal", error);
+    }
   };
 
   // --- Area / Building Operations ---
