@@ -37,12 +37,23 @@ export default defineConfig({
       }
     })
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+          ui: ['framer-motion', 'lucide-react', 'konva', 'react-konva'],
+          utils: ['axios', 'xlsx']
+        }
+      }
+    }
+  },
   server: {
     port: 3000,
     host: true, // Listen on all local IPs so mobile can access
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false,
       }
