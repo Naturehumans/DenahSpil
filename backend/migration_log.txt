@@ -1,0 +1,35 @@
+============================================================
+SQLite -> PostgreSQL Safe Migration
+============================================================
+Opened SQLite: spildenah.db
+Connected to PostgreSQL
+  user remap: ee055c1a-6779-4ed1-b7f8-1ee2c44332ff -> d372ac8a-da2c-4dea-8ec3-821aa174c4f2
+  building remap: 1470d675-8214-4666-83c8-f777f61a2911 -> 463e4546-1c4b-4cfc-87e1-c68222fe13eb
+  cat remap: d50cdeb2-a851-4b42-a50d-08d7f69c5731 -> 945cffb8-ce27-4749-b3e0-e5b1719a3faf
+  cat remap: f266e44e-d11b-4836-bc02-f2663c4169e8 -> 9aafacfb-1ee9-4aa9-97be-ee1746ebb935
+  cat remap: 8e144fce-d33b-4a65-9e03-201db1a71ec2 -> 1cf80e3d-dcc7-407b-868f-6d34d50c759a
+  cat remap: b0abbdc1-9976-447a-a221-59a586cdfc8b -> 3a227657-a4b2-4c36-90da-e989b03c3005
+Found 2 duplicate buildings, cleaning...
+  Deleted duplicate building: 463e4546-1c4b-4cfc-87e1-c68222fe13eb
+users: 1 in SQLite, 0 inserted
+buildings: 1 in SQLite, 1 inserted
+equipment_categories: 4 in SQLite, 0 inserted
+floors: 2 in SQLite, 0 inserted
+equipments: 1 in SQLite, 1 inserted
+slot_templates: 27 in SQLite, 27 inserted
+asset_inventory: 0 in SQLite, 0 inserted
+inventory_history_logs: 5 in SQLite, 5 inserted
+
+============================================================
+FINAL VERIFICATION - PostgreSQL row counts:
+============================================================
+  users                               1 rows
+  buildings                           2 rows
+  equipment_categories                4 rows
+  floors                              2 rows
+  equipments                          1 rows
+  slot_templates                      27 rows
+  asset_inventory                     0 rows
+  inventory_history_logs              5 rows
+
+SUCCESS! Migration complete. PostgreSQL is now the sole database.
