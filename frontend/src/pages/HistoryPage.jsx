@@ -77,23 +77,30 @@ const HistoryPage = () => {
   const fetchHistoryData = async () => {
     setLoading(true);
     try {
-      const logsRes = await getInventoryLogs().catch(err => {
-        console.error("Error fetching logs:", err);
-        return [];
-      });
-      const catsRes = await getCategories().catch(err => {
-        console.error("Error fetching categories:", err);
-        return [];
-      });
+      const { getAssets } = await import('../api/inventory');
+
+      const [logsRes, catsRes, assetsRes] = await Promise.all([
+        getInventoryLogs().catch(err => {
+          console.error("Error fetching logs:", err);
+          return [];
+        }),
+        getCategories().catch(err => {
+          console.error("Error fetching categories:", err);
+          return [];
+        }),
+        getAssets('available').catch(err => {
+          console.error("Error fetching available assets:", err);
+          return [];
+        })
+      ]);
 
       const backendLogs = Array.isArray(logsRes) ? logsRes : [];
       setLogs(backendLogs);
       setCategories(Array.isArray(catsRes) ? catsRes : []);
 
-      // Load expired items from API (fetching available assets and filtering for expired)
+      // Load expired items from API
       try {
-        const { getAssets } = await import('../api/inventory');
-        const assets = await getAssets('available');
+        const assets = assetsRes;
         
         let exItems = [];
         if (assets && Array.isArray(assets)) {

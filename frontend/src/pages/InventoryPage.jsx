@@ -114,11 +114,18 @@ const InventoryPage = () => {
   const fetchData = async (showLoading = true) => {
     try {
       if (showLoading) setLoading(true);
-      const cats = await getCategories();
+
+      const [cats, assets, damagedAssets, eqs, logs] = await Promise.all([
+        getCategories().catch(() => []),
+        getAssets('available').catch(() => []),
+        getAssets('damaged').catch(() => []),
+        getAllEquipments().catch(() => []),
+        getInventoryLogs().catch(() => [])
+      ]);
+
       setCategories(cats);
       
       // Load Available Assets from Backend
-      const assets = await getAssets('available');
       setAvailableAssets(assets || []);
       
       // Group available assets into brandInventory format
@@ -148,31 +155,24 @@ const InventoryPage = () => {
 
       // Load Damaged Inventory from Backend
       let localDamaged = [];
-      try {
-        const damagedAssets = await getAssets('damaged');
-        if (damagedAssets && Array.isArray(damagedAssets)) {
-          localDamaged = damagedAssets.map(a => ({
-            id: a.id,
-            asset_id: a.asset_id || a.name || `AST-${a.id}`,
-            brand: a.brand || 'Tanpa Merk',
-            model_number: a.model_number || 'Standard',
-            category_id: a.category_id,
-            category_name: a.category?.name || 'Umum',
-            category_color: a.category?.color || '#3b82f6',
-            unassigned_at: a.updated_at || a.created_at || new Date().toISOString()
-          }));
-        }
-      } catch (err) {
-        console.log("Could not fetch API damaged assets:", err);
+      if (damagedAssets && Array.isArray(damagedAssets)) {
+        localDamaged = damagedAssets.map(a => ({
+          id: a.id,
+          asset_id: a.asset_id || a.name || `AST-${a.id}`,
+          brand: a.brand || 'Tanpa Merk',
+          model_number: a.model_number || 'Standard',
+          category_id: a.category_id,
+          category_name: a.category?.name || 'Umum',
+          category_color: a.category?.color || '#3b82f6',
+          unassigned_at: a.updated_at || a.created_at || new Date().toISOString()
+        }));
       }
       setDamagedInventory(localDamaged);
       
       // Load Active Equipments
-      const eqs = await getAllEquipments();
       setActiveEquipments(eqs || []);
       
       // Load History Logs
-      const logs = await getInventoryLogs();
       setInventoryLogs(logs || []);
       
     } catch (e) {

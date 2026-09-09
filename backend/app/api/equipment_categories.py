@@ -20,18 +20,20 @@ async def list_categories(db: AsyncSession = Depends(get_db), current_user: User
     
     stmt = select(EquipmentCategory).order_by(EquipmentCategory.name)
     result = await db.execute(stmt)
+    categories = result.scalars().all()
     
-    categories = []
-    for cat in result.scalars().all():
-        count_stmt = select(func.count(AssetInventory.id)).where(
-            AssetInventory.category_id == cat.id, 
-            AssetInventory.status == 'available'
-        )
-        c_res = await db.execute(count_stmt)
-        asset_count = c_res.scalar() or 0
+    if categories:
+        count_stmt = select(
+            AssetInventory.category_id, 
+            func.count(AssetInventory.id)
+        ).where(AssetInventory.status == 'available').group_by(AssetInventory.category_id)
         
-        setattr(cat, "available_stock", cat.initial_stock + asset_count)
-        categories.append(cat)
+        c_res = await db.execute(count_stmt)
+        counts = dict(c_res.fetchall())
+        
+        for cat in categories:
+            asset_count = counts.get(cat.id, 0)
+            setattr(cat, "available_stock", cat.initial_stock + asset_count)
         
     return categories
 

@@ -71,10 +71,12 @@ const DashboardPage = () => {
   const fetchInitialData = async () => {
     try {
       setLoading(true);
-      const cats = await getCategories();
+      // Fetch categories and buildings concurrently
+      const [cats, bldgs] = await Promise.all([
+        getCategories(),
+        getBuildings()
+      ]);
       setCategories(cats);
-
-      const bldgs = await getBuildings();
       setBuildings(bldgs);
 
       if (bldgs.length > 0) {
@@ -93,10 +95,12 @@ const DashboardPage = () => {
           setCurrentFloor(activeFloor);
           localStorage.setItem('spil_active_floor_id', activeFloor.id);
           
-          const eqs = await getEquipmentsByFloor(activeFloor.id);
+          // Fetch equipments and slots concurrently
+          const [eqs, flrSlots] = await Promise.all([
+            getEquipmentsByFloor(activeFloor.id),
+            getSlotsByFloor(activeFloor.id)
+          ]);
           setEquipments(eqs);
-          
-          const flrSlots = await getSlotsByFloor(activeFloor.id);
           setSlots(flrSlots);
         }
       }
