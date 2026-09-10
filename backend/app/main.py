@@ -39,6 +39,13 @@ async def seed_data():
             db.add(building)
             logger.info("Seeded default building")
             
+        # Seed Dummy User
+        result = await db.execute(select(User).where(User.username == "user"))
+        if not result.scalars().first():
+            dummy = User(username="user", email="user@spildenah.com", hashed_password=hash_password("12345"), role="user")
+            db.add(dummy)
+            logger.info("Seeded dummy user")
+            
         # Seed Equipment Categories
         categories = [
             {"name": "Lampu", "color": "#fbbf24", "icon_url": None},

@@ -3,6 +3,7 @@ import { getCategories, createCategory, updateCategory, deleteCategory } from '.
 import { getAllEquipments } from '../api/equipments';
 import { getInventoryLogs, addStockToInventory, getAssets, restoreAsset, deleteAsset } from '../api/inventory';
 import { useToast } from '../contexts/ToastContext';
+import { useAuth } from '../contexts/AuthContext';
 import { Search, Package, PackageX, Wrench, Trash2, ArrowLeft, Plus, Minus, Check, X, MapPin, History, Tag, Edit2, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ConfirmModal from '../components/UI/ConfirmModal';
@@ -50,6 +51,10 @@ const InventoryPage = () => {
   const [confirmDeleteDamaged, setConfirmDeleteDamaged] = useState(null);
   const [confirmDeleteBrand, setConfirmDeleteBrand] = useState(null);
   const [itemHistoryModal, setItemHistoryModal] = useState(null);
+
+  const { showToast } = useToast();
+  const navigate = useNavigate();
+  const { isAdmin } = useAuth();
 
   const handleDeleteBrand = (item, e) => {
     if (e) {
@@ -106,9 +111,7 @@ const InventoryPage = () => {
     }
   };
   
-  const { showToast } = useToast();
-  const navigate = useNavigate();
-
+  
   useEffect(() => {
     fetchData();
   }, []);
@@ -739,7 +742,7 @@ const InventoryPage = () => {
             />
           </div>
 
-          {(activeTab === 'good' && !selectedCategoryView) && (
+          {(isAdmin && activeTab === 'good' && !selectedCategoryView) && (
             <button
               onClick={handleOpenAddCategoryModal}
               className="neu-action-btn mobile-w-full mobile-text-center"
@@ -847,42 +850,44 @@ const InventoryPage = () => {
                         </div>
                       </div>
 
-                      {/* Action edit/delete */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={e => e.stopPropagation()}>
-                        <button 
-                          onClick={(e) => handleOpenEditCategoryModal(cat, e)}
-                          style={{ 
-                            padding: '7px 9px', color: '#b45309', background: 'rgba(245, 158, 11, 0.12)', 
-                            border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '8px', cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center' 
-                          }}
-                          title="Edit Kategori"
-                        >
-                          <Edit2 size={16} color="#b45309" />
-                        </button>
-                        <button 
-                          onClick={(e) => { 
-                            e.stopPropagation();
-                            const isUsed = activeEquipments.some(eq => 
-                              String(eq.category_id || eq.category?.id) === String(cat.id) || 
-                              (eq.category_name || '').toLowerCase() === (cat.name || '').toLowerCase()
-                            );
-                            if (isUsed) {
-                              setCategoryBlockedNotice(cat);
-                            } else {
-                              setConfirmDeleteCategory(cat);
-                            }
-                          }}
-                          style={{ 
-                            padding: '7px 9px', color: '#dc2626', background: 'rgba(239, 68, 68, 0.12)', 
-                            border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center' 
-                          }}
-                          title="Hapus Kategori"
-                        >
-                          <Trash2 size={16} color="#dc2626" />
-                        </button>
-                      </div>
+                      {/* Action edit/delete - Admin Only */}
+                      {isAdmin && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={e => e.stopPropagation()}>
+                          <button 
+                            onClick={(e) => handleOpenEditCategoryModal(cat, e)}
+                            style={{ 
+                              padding: '7px 9px', color: '#b45309', background: 'rgba(245, 158, 11, 0.12)', 
+                              border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '8px', cursor: 'pointer',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center' 
+                            }}
+                            title="Edit Kategori"
+                          >
+                            <Edit2 size={16} color="#b45309" />
+                          </button>
+                          <button 
+                            onClick={(e) => { 
+                              e.stopPropagation();
+                              const isUsed = activeEquipments.some(eq => 
+                                String(eq.category_id || eq.category?.id) === String(cat.id) || 
+                                (eq.category_name || '').toLowerCase() === (cat.name || '').toLowerCase()
+                              );
+                              if (isUsed) {
+                                setCategoryBlockedNotice(cat);
+                              } else {
+                                setConfirmDeleteCategory(cat);
+                              }
+                            }}
+                            style={{ 
+                              padding: '7px 9px', color: '#dc2626', background: 'rgba(239, 68, 68, 0.12)', 
+                              border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', cursor: 'pointer',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center' 
+                            }}
+                            title="Hapus Kategori"
+                          >
+                            <Trash2 size={16} color="#dc2626" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -905,27 +910,29 @@ const InventoryPage = () => {
                     </h3>
                   </div>
 
-                  <button
-                    onClick={handleOpenAddBrandModal}
-                    className="neu-action-btn"
-                    style={{
-                      padding: '8px 16px',
-                      borderRadius: '10px',
-                      background: 'var(--color-primary)',
-                      color: 'white',
-                      border: 'none',
-                      cursor: 'pointer',
-                      fontWeight: '700',
-                      fontSize: '0.85rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      boxShadow: '0 4px 10px rgba(58, 149, 66, 0.2)'
-                    }}
-                  >
-                    <Plus size={16} />
-                    <span>Tambah Barang / Merk Baru</span>
-                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={handleOpenAddBrandModal}
+                      className="neu-action-btn"
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '10px',
+                        background: 'var(--color-primary)',
+                        color: 'white',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontWeight: '700',
+                        fontSize: '0.85rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        boxShadow: '0 4px 10px rgba(58, 149, 66, 0.2)'
+                      }}
+                    >
+                      <Plus size={16} />
+                      <span>Tambah Barang / Merk Baru</span>
+                    </button>
+                  )}
                 </div>
 
                 {filteredGood.filter(b => String(b.category_id) === String(selectedCategoryView.id) || (b.category_name || '').toLowerCase() === (selectedCategoryView.name || '').toLowerCase()).length === 0 ? (
@@ -1009,6 +1016,7 @@ const InventoryPage = () => {
                                 <span style={{ fontSize: '0.68rem', fontWeight: '900', letterSpacing: '0.5px' }}>STOK</span>
                                 <span style={{ fontSize: '1.3rem', fontWeight: '900' }}>{item.stock}</span>
                               </div>
+                            {isAdmin && (
                               <button
                                 type="button"
                                 onClick={(e) => handleDeleteBrand(item, e)}
@@ -1028,6 +1036,7 @@ const InventoryPage = () => {
                               >
                                 <Trash2 size={16} color="#dc2626" />
                               </button>
+                            )}
                             </div>
                           </div>
                           
@@ -1040,55 +1049,57 @@ const InventoryPage = () => {
                             </div>
                           </div>
 
-                          <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setAddStockModal(item); }}
-                              style={{ 
-                                flex: 1, padding: '10px', borderRadius: '10px', 
-                                background: '#f8fafc', color: '#475569', border: '1px solid #e2e8f0',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                                fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer',
-                                transition: 'all 0.2s',
-                              }}
-                              onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
-                              onMouseLeave={(e) => e.currentTarget.style.background = '#f8fafc'}
-                              title="Input manual banyak stok sekaligus"
-                            >
-                              <Plus size={16} /> Stok Masal
-                            </button>
-
-                            <div style={{ display: 'flex', gap: '6px' }}>
-                              <button
-                                onClick={(e) => handleQuickReduceStock(item, e)}
-                                disabled={item.stock <= 0}
+                          {isAdmin && (
+                            <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setAddStockModal(item); }}
                                 style={{ 
-                                  width: '42px', height: '100%', borderRadius: '10px', 
-                                  background: item.stock <= 0 ? '#f8fafc' : '#fee2e2', 
-                                  color: item.stock <= 0 ? '#cbd5e1' : '#ef4444', 
-                                  border: item.stock <= 0 ? '1px solid #e2e8f0' : 'none',
-                                  display: 'flex', alignItems: 'center', justifyContent: 'center', 
-                                  cursor: item.stock <= 0 ? 'not-allowed' : 'pointer',
+                                  flex: 1, padding: '10px', borderRadius: '10px', 
+                                  background: '#f8fafc', color: '#475569', border: '1px solid #e2e8f0',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                                  fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer',
                                   transition: 'all 0.2s',
                                 }}
-                                title="Kurangi 1 Stok"
+                                onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = '#f8fafc'}
+                                title="Input manual banyak stok sekaligus"
                               >
-                                <Minus size={18} />
+                                <Plus size={16} /> Stok Masal
                               </button>
-                              
-                              <button 
-                                onClick={(e) => handleQuickAddStock(item, e)}
-                                style={{ 
-                                  width: '42px', height: '100%', borderRadius: '10px', 
-                                  background: '#dcfce7', color: '#22c55e', border: 'none',
-                                  display: 'flex', alignItems: 'center', justifyContent: 'center', 
-                                  cursor: 'pointer', transition: 'all 0.2s',
-                                }}
-                                title="Tambah 1 Stok"
-                              >
-                                <Plus size={18} />
-                              </button>
+
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <button
+                                  onClick={(e) => handleQuickReduceStock(item, e)}
+                                  disabled={item.stock <= 0}
+                                  style={{ 
+                                    width: '42px', height: '100%', borderRadius: '10px', 
+                                    background: item.stock <= 0 ? '#f8fafc' : '#fee2e2', 
+                                    color: item.stock <= 0 ? '#cbd5e1' : '#ef4444', 
+                                    border: item.stock <= 0 ? '1px solid #e2e8f0' : 'none',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                                    cursor: item.stock <= 0 ? 'not-allowed' : 'pointer',
+                                    transition: 'all 0.2s',
+                                  }}
+                                  title="Kurangi 1 Stok"
+                                >
+                                  <Minus size={18} />
+                                </button>
+                                
+                                <button 
+                                  onClick={(e) => handleQuickAddStock(item, e)}
+                                  style={{ 
+                                    width: '42px', height: '100%', borderRadius: '10px', 
+                                    background: '#dcfce7', color: '#22c55e', border: 'none',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                                    cursor: 'pointer', transition: 'all 0.2s',
+                                  }}
+                                  title="Tambah 1 Stok"
+                                >
+                                  <Plus size={18} />
+                                </button>
+                              </div>
                             </div>
-                          </div>
+                          )}
                         </div>
                       );
                     })}

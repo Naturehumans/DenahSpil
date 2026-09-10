@@ -10,6 +10,7 @@ import EquipmentForm from '../components/Forms/EquipmentForm';
 import InventoryManagement from '../components/Forms/InventoryManagement';
 import ConfirmModal from '../components/UI/ConfirmModal';
 import { useToast } from '../contexts/ToastContext';
+import { useAuth } from '../contexts/AuthContext';
 import Skeleton from '../components/UI/Skeleton';
 import Input from '../components/UI/Input';
 
@@ -79,6 +80,7 @@ const DashboardPage = () => {
   const pendingActionRef = useRef(false);
   
   const { showToast } = useToast();
+  const { isAdmin } = useAuth();
 
   const fetchInitialData = async () => {
     try {
@@ -1117,12 +1119,13 @@ const DashboardPage = () => {
 
   return (
     <MainLayout
-      onManageFloors={handleManageFloors}
-      onManageCategories={handleManageCategories}
-      onManageEquipments={handleManageEquipments}
+      onManageFloors={isAdmin ? handleManageFloors : undefined}
+      onManageCategories={isAdmin ? handleManageCategories : undefined}
+      onManageEquipments={isAdmin ? handleManageEquipments : undefined}
       onManageHistory={handleManageHistory}
       onManageInventory={() => navigate('/inventory')}
       onExport={handleExport}
+      isAdmin={isAdmin}
       // Pass states to layout
       buildings={buildings}
       currentBuilding={currentBuilding}
@@ -1721,8 +1724,8 @@ const DashboardPage = () => {
             </div>
             
             
-            {/* KONDISI ASET - KHUSUS PERMANENT (BER-ID) */}
-            {(selectedSlot?.category?.has_id || selectedEquipment?.category?.has_id || categories.find(c => c.id === selectedEquipment?.category_id)?.has_id) && (
+            {/* KONDISI ASET - ADMIN ONLY */}
+            {isAdmin && (selectedSlot?.category?.has_id || selectedEquipment?.category?.has_id || categories.find(c => c.id === selectedEquipment?.category_id)?.has_id) && (
               <div className="neu-inset" style={{ padding: '16px', borderRadius: '12px', marginTop: '16px' }}>
                 <p style={{ margin: '0 0 12px', fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text)' }}>Kondisi Aset</p>
                 <div className="mobile-col" style={{ display: 'flex', gap: '8px' }}>
@@ -1775,7 +1778,7 @@ const DashboardPage = () => {
             )}
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px' }}>
-              {isEditMode ? (
+              {isAdmin && isEditMode ? (
                 <button 
                   onClick={() => {
                     if (selectedSlot) {

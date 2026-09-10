@@ -36,7 +36,8 @@ const MainLayout = ({
   setIsDrawingPolygon,
   currentPolygon,
   setCurrentPolygon,
-  onPolygonComplete
+  onPolygonComplete,
+  isAdmin = true
 }) => {
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
@@ -197,6 +198,7 @@ const MainLayout = ({
           onManageEquipments={onManageEquipments}
           onManageHistory={onManageHistory}
           onManageInventory={onManageInventory}
+          isAdmin={isAdmin}
         />
       </div>
 
