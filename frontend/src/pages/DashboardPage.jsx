@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShieldAlert, AlertTriangle } from 'lucide-react';
 import MainLayout from '../components/Layout/MainLayout';
@@ -62,9 +62,12 @@ const DashboardPage = () => {
   const [highlightedSlotId, setHighlightedSlotId] = useState(null);
   const [warrantyConfirm, setWarrantyConfirm] = useState(null);
 
-  const [selectedCategoryId, setSelectedCategoryId] = useState(null);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
   const [categoryBlockedNotice, setCategoryBlockedNotice] = useState(null);
   const [activeMobileSlotTemplate, setActiveMobileSlotTemplate] = useState(null);
+  const [pendingReplacement, setPendingReplacement] = useState(null);
+  const [pendingSlotMove, setPendingSlotMove] = useState(null);
+  const pendingActionRef = useRef(false);
   
   const { showToast } = useToast();
 
@@ -117,6 +120,27 @@ const DashboardPage = () => {
     fetchInitialData();
   }, [showToast]);
 
+  useEffect(() => {
+    if (pendingReplacement) {
+      const slot = slots.find(s => s.id === pendingReplacement.slotId);
+      // Wait for the slot to become empty before triggering the drop
+      if (slot && !slot.equipment_id && !slot.equipment && pendingActionRef.current) {
+        pendingActionRef.current = false;
+        handleItemDropOnSlot(pendingReplacement.categoryId, pendingReplacement.slotId);
+        setPendingReplacement(null);
+      }
+    }
+    if (pendingSlotMove) {
+      const targetSlot = slots.find(s => s.id === pendingSlotMove.targetSlotId);
+      const sourceSlot = slots.find(s => s.id === pendingSlotMove.sourceSlotId);
+      if (targetSlot && !targetSlot.equipment_id && !targetSlot.equipment && sourceSlot && pendingActionRef.current) {
+        pendingActionRef.current = false;
+        handleSlotMove(sourceSlot.id, targetSlot.position_x, targetSlot.position_y, true);
+        setPendingSlotMove(null);
+      }
+    }
+  }, [slots, pendingReplacement, pendingSlotMove]);
+
   const handleSelectFloor = async (floor) => {
     setCurrentFloor(floor);
     if (floor && floor.id) {
@@ -127,7 +151,7 @@ const DashboardPage = () => {
       setEquipments(eqs);
       const flrSlots = await getSlotsByFloor(floor.id);
       setSlots(flrSlots);
-      setSelectedCategoryId(null); // Reset category filter on floor change
+      setSelectedCategoryIds([]); // Reset category filter on floor change
     } catch (error) {
       showToast('Gagal memuat data barang untuk lantai ini', 'error');
     }
@@ -151,7 +175,7 @@ const DashboardPage = () => {
         setCurrentFloor(null);
         setEquipments([]);
         setSlots([]);
-        setSelectedCategoryId(null);
+        setSelectedCategoryIds([]);
       }
     } catch (error) {
       showToast('Gagal memuat lantai area', 'error');
@@ -246,6 +270,14 @@ const DashboardPage = () => {
     if (!slot) return;
     if (slot.category_id !== categoryId) {
       showToast('Kategori barang tidak cocok dengan slot ini', 'error');
+      return;
+    }
+
+    if (slot.equipment_id || slot.equipment) {
+      setSelectedSlot(slot);
+      pendingActionRef.current = true;
+      setPendingReplacement({ categoryId, slotId });
+      setActiveModal('unassign_destination');
       return;
     }
 
@@ -540,6 +572,9 @@ const DashboardPage = () => {
     } catch (err) {
       console.error("Error unassigning item:", err);
       showToast(err.response?.data?.detail || err.message || 'Gagal menghapus barang', 'error');
+      setPendingReplacement(null);
+      setPendingSlotMove(null);
+      pendingActionRef.current = false;
     }
   };
 
@@ -574,10 +609,9 @@ const DashboardPage = () => {
     if (!sourceSlot) return;
 
     if (isFilled && (sourceSlot.equipment_id || sourceSlot.equipment)) {
-      // Find an EMPTY target slot of the SAME category near drop coordinates (within 60px)
+      // Find a target slot of the SAME category near drop coordinates (within 60px)
       const targetSlot = slots.find(s => 
         s.id !== id && 
-        s.equipment_id == null && 
         (String(s.category_id) === String(sourceSlot.category_id) || 
          String(s.category?.id) === String(sourceSlot.category_id) ||
          String(s.category_id) === String(sourceSlot.category?.id)) &&
@@ -585,6 +619,16 @@ const DashboardPage = () => {
       );
 
       if (targetSlot) {
+        if (targetSlot.equipment_id != null) {
+          // Target is FILLED! 
+          // We need to unassign targetSlot, then move sourceSlot to targetSlot.
+          setSelectedSlot(targetSlot);
+          pendingActionRef.current = true;
+          setPendingSlotMove({ sourceSlotId: sourceSlot.id, targetSlotId: targetSlot.id });
+          setActiveModal('unassign_destination');
+          return;
+        }
+
         // Optimistic update
         setSlots(prev => prev.map(s => {
           if (s.id === targetSlot.id) {
@@ -705,6 +749,9 @@ const DashboardPage = () => {
     setActiveModal(null);
     setSelectedSlot(null);
     setUnassignDate('');
+    setPendingReplacement(null);
+    setPendingSlotMove(null);
+    pendingActionRef.current = false;
     try {
       const cats = await getCategories();
       setCategories(cats);
@@ -1004,15 +1051,15 @@ const DashboardPage = () => {
     : (currentFloor ? "https://images.unsplash.com/photo-1600607686527-6fb886090705?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80" : "");
 
   // Filter equipments & slots for Canvas based on selected category
-  const canvasEquipments = selectedCategoryId 
-    ? equipments.filter(eq => String(eq.category_id || eq.category?.id) === String(selectedCategoryId))
+  const canvasEquipments = selectedCategoryIds.length > 0
+    ? equipments.filter(eq => selectedCategoryIds.map(String).includes(String(eq.category_id || eq.category?.id)))
     : equipments;
 
-  const canvasSlots = selectedCategoryId
-    ? slots.filter(slot => String(slot.category_id || slot.category?.id) === String(selectedCategoryId))
+  const canvasSlots = selectedCategoryIds.length > 0
+    ? slots.filter(slot => selectedCategoryIds.map(String).includes(String(slot.category_id || slot.category?.id)))
     : slots;
 
-  const selectedCategoryObj = categories.find(c => String(c.id) === String(selectedCategoryId));
+  const selectedCategoryObj = selectedCategoryIds.length === 1 ? categories.find(c => String(c.id) === String(selectedCategoryIds[0])) : null;
 
   return (
     <MainLayout
@@ -1036,8 +1083,16 @@ const DashboardPage = () => {
       onEquipmentDoubleClick={handleEquipmentDoubleClick}
       highlightedSlotId={highlightedSlotId}
       isEditMode={isEditMode}
-      selectedCategoryId={selectedCategoryId}
-      onSelectCategory={setSelectedCategoryId}
+      selectedCategoryIds={selectedCategoryIds}
+      onSelectCategory={(id) => {
+        if (id === null) {
+          setSelectedCategoryIds([]);
+        } else {
+          setSelectedCategoryIds(prev => 
+            prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
+          );
+        }
+      }}
       slots={slots}
       onDeleteSlot={handleDeleteSlot}
       onSelectMobileSlotTemplate={(cat) => {

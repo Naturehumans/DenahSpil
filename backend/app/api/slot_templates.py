@@ -169,17 +169,6 @@ async def assign_equipment_to_slot(
     if cat.initial_stock <= 0 and avail_assets_count <= 0 and not brand:
         raise HTTPException(status_code=400, detail="Stock is empty for this category")
         
-    # Decrement stock manually if > 0
-    if cat.initial_stock > 0:
-        cat.initial_stock -= 1
-
-    # Generate auto-name (ID Barang) strictly incrementing
-    bldg_abbr = abbreviate(slot.floor.building.name) if (slot.floor and slot.floor.building) else "GU"
-    cat_abbr = abbreviate(cat.name)
-    floor_num = slot.floor.floor_number if slot.floor else 1
-    
-    cat_clean = cat.name.replace(" ", "")
-
     # 1. First check if an available AssetInventory asset exists for this category/brand/model
     asset_query = select(AssetInventory).where(
         AssetInventory.category_id == cat.id,
@@ -193,10 +182,21 @@ async def assign_equipment_to_slot(
     asset_res = await db.execute(asset_query.order_by(AssetInventory.created_at.asc()))
     avail_asset = asset_res.scalars().first()
 
+    # Generate abbreviation variables needed for slot_code
+    bldg_abbr = abbreviate(slot.floor.building.name) if (slot.floor and slot.floor.building) else "GU"
+    cat_abbr = abbreviate(cat.name)
+    floor_num = slot.floor.floor_number if slot.floor else 1
+    cat_clean = cat.name.replace(" ", "")
+
     if avail_asset:
         auto_name = avail_asset.asset_id
         avail_asset.status = 'in_use'
+        # Do not decrement initial_stock because we are using an already-tracked AssetInventory item
     else:
+        # Decrement stock manually if > 0 (pulling from bulk initial_stock)
+        if cat.initial_stock > 0:
+            cat.initial_stock -= 1
+
         # 2. If no AssetInventory item exists, generate auto_name using the structured format
         from app.utils.asset_id_generator import get_next_asset_ids
         new_ids = await get_next_asset_ids(cat.name, brand, model_number, db, cat.id, 1)

@@ -3,7 +3,7 @@ import { getCategories, createCategory, updateCategory, deleteCategory } from '.
 import { getAllEquipments } from '../api/equipments';
 import { getInventoryLogs, addStockToInventory, getAssets, restoreAsset, deleteAsset } from '../api/inventory';
 import { useToast } from '../contexts/ToastContext';
-import { Search, Package, PackageX, Wrench, Trash2, ArrowLeft, Plus, Check, X, MapPin, History, Tag, Edit2, AlertTriangle } from 'lucide-react';
+import { Search, Package, PackageX, Wrench, Trash2, ArrowLeft, Plus, Minus, Check, X, MapPin, History, Tag, Edit2, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ConfirmModal from '../components/UI/ConfirmModal';
 
@@ -81,6 +81,22 @@ const InventoryPage = () => {
         }
       }
 
+      // Also remove from local storage spil_category_brands
+      const localBrandsStr = localStorage.getItem('spil_category_brands');
+      if (localBrandsStr) {
+        try {
+          const parsed = JSON.parse(localBrandsStr);
+          const catKey = (item.category_name || '').toLowerCase();
+          if (parsed[catKey]) {
+            parsed[catKey] = parsed[catKey].filter(b => 
+              !( (b.brand || '').toLowerCase() === (item.brand || '').toLowerCase() &&
+                 (b.model_number || '').toLowerCase() === (item.model_number || '').toLowerCase() )
+            );
+            localStorage.setItem('spil_category_brands', JSON.stringify(parsed));
+          }
+        } catch(e) { console.error(e) }
+      }
+
       showToast(`Merk ${item.brand} berhasil dibuang & dicatat dalam riwayat log`, 'success');
       setConfirmDeleteBrand(null);
       await fetchData(false);
@@ -141,16 +157,69 @@ const InventoryPage = () => {
               category_color: asset.category?.color || '#3b82f6',
               brand: asset.brand || 'Tanpa Merk',
               model_number: asset.model_number || 'Standard',
-              stock: 0,
-              min_stock: 1, // default or backend value
+              stock: 0, // We will calculate true stock below
+              asset_count: 0, // Track actual backend assets
+              min_stock: 1,
               warranty_months: 0,
               purchase_date: null,
               expired_date: null
             };
           }
-          map[key].stock += 1;
+          map[key].asset_count += 1;
         });
       }
+
+      // Merge local storage spil_category_brands so edited items in dashboard appear here
+      const localBrands = localStorage.getItem('spil_category_brands');
+      if (localBrands) {
+        try {
+          const parsedBrands = JSON.parse(localBrands);
+          Object.keys(parsedBrands).forEach(catNameKey => {
+            parsedBrands[catNameKey].forEach(b => {
+              const cat = cats.find(c => c.id === b.category_id || (c.name || '').toLowerCase() === catNameKey);
+              const catId = b.category_id || (cat ? cat.id : catNameKey);
+              const key = `${catId}_${(b.brand || 'Tanpa Merk').toLowerCase()}_${(b.model_number || 'Standard').toLowerCase()}`;
+              
+              if (!map[key]) {
+                map[key] = {
+                  id: b.id || `b_${catId}_${b.brand}_${b.model_number}`,
+                  category_id: catId,
+                  category_name: cat?.name || catNameKey,
+                  category_color: cat?.color || '#3b82f6',
+                  brand: b.brand || 'Tanpa Merk',
+                  model_number: b.model_number || 'Standard',
+                  stock: 0,
+                  asset_count: 0,
+                  min_stock: parseInt(b.min_stock) || 1,
+                  warranty_months: parseInt(b.warranty_months) || 0,
+                  purchase_date: null,
+                  expired_date: null
+                };
+              }
+              // The true stock is either the local storage stock OR the asset count, whichever is larger 
+              // (because local storage already includes unassigned items, and initial stock)
+              // Actually, local storage b.stock IS the total stock intended by the user
+              map[key].stock = parseInt(b.stock) || 0;
+              // Ensure stock is at least the number of physical assets we have in the backend
+              if (map[key].stock < map[key].asset_count) {
+                  map[key].stock = map[key].asset_count;
+              }
+              map[key].min_stock = Math.max(map[key].min_stock, parseInt(b.min_stock) || 0);
+              map[key].warranty_months = Math.max(map[key].warranty_months, parseInt(b.warranty_months) || 0);
+            });
+          });
+        } catch (err) {
+          console.error("Failed to parse spil_category_brands", err);
+        }
+      }
+
+      // Ensure all items have stock >= asset_count (especially those not in localStorage)
+      Object.keys(map).forEach(key => {
+        if ((map[key].stock || 0) < (map[key].asset_count || 0)) {
+          map[key].stock = map[key].asset_count;
+        }
+      });
+
       setBrandInventory(Object.values(map));
 
       // Load Damaged Inventory from Backend
@@ -164,9 +233,36 @@ const InventoryPage = () => {
           category_id: a.category_id,
           category_name: a.category?.name || 'Umum',
           category_color: a.category?.color || '#3b82f6',
-          unassigned_at: a.updated_at || a.created_at || new Date().toISOString()
+          unassigned_at: a.updated_at || a.created_at || new Date().toISOString(),
+          is_local: false
         }));
       }
+
+      // Merge local storage spil_damaged_inventory
+      const localDamagedStr = localStorage.getItem('spil_damaged_inventory');
+      if (localDamagedStr) {
+        try {
+          const parsedDamaged = JSON.parse(localDamagedStr);
+          parsedDamaged.forEach(d => {
+            const cat = cats.find(c => c.id === d.category_id || (c.name || '').toLowerCase() === (d.category_name || '').toLowerCase());
+            localDamaged.push({
+              id: d.id || `local_dmg_${Date.now()}_${Math.random()}`,
+              asset_id: d.asset_id || d.name || `Barang-${Math.floor(Math.random()*1000)}`,
+              brand: d.brand || 'Tanpa Merk',
+              model_number: d.model_number || 'Standard',
+              category_id: d.category_id || (cat ? cat.id : null),
+              category_name: d.category_name || cat?.name || 'Umum',
+              category_color: cat?.color || '#f59e0b',
+              unassigned_at: d.unassigned_at || new Date().toISOString(),
+              is_local: true,
+              original_local_data: d
+            });
+          });
+        } catch (err) {
+          console.error("Failed to parse spil_damaged_inventory", err);
+        }
+      }
+
       setDamagedInventory(localDamaged);
       
       // Load Active Equipments
@@ -304,6 +400,81 @@ const InventoryPage = () => {
 
 
 
+  const handleQuickAddStock = async (item, e) => {
+    e.stopPropagation();
+    try {
+      await addStockToInventory({
+        category_id: item.category_id,
+        brand: item.brand,
+        model_number: item.model_number || 'Standard',
+        quantity: 1
+      });
+      
+      // Sync local storage
+      const localBrandsStr = localStorage.getItem('spil_category_brands');
+      if (localBrandsStr) {
+        try {
+          const parsed = JSON.parse(localBrandsStr);
+          const catKey = (item.category_name || '').toLowerCase();
+          if (parsed[catKey]) {
+            const existingBrand = parsed[catKey].find(b => 
+              (b.brand || '').toLowerCase() === (item.brand || '').toLowerCase() &&
+              (b.model_number || '').toLowerCase() === (item.model_number || '').toLowerCase()
+            );
+            if (existingBrand) {
+              existingBrand.stock = (parseInt(existingBrand.stock) || 0) + 1;
+              localStorage.setItem('spil_category_brands', JSON.stringify(parsed));
+            }
+          }
+        } catch(e) {}
+      }
+      
+      showToast(`1 Stok ${item.brand || ''} berhasil ditambahkan`, 'success');
+      fetchData(false);
+    } catch (err) {
+      showToast('Gagal menambah stok', 'error');
+    }
+  };
+
+  const handleQuickReduceStock = async (item, e) => {
+    e.stopPropagation();
+    if (item.stock <= 0) return;
+    try {
+      const assetToRemove = availableAssets.find(a => 
+        String(a.category_id) === String(item.category_id) && 
+        (a.brand || 'Tanpa Merk').toLowerCase() === (item.brand || 'Tanpa Merk').toLowerCase() &&
+        (a.model_number || 'Standard').toLowerCase() === (item.model_number || 'Standard').toLowerCase()
+      );
+      if (assetToRemove) {
+        await deleteAsset(assetToRemove.id);
+        showToast(`1 Stok ${item.brand || ''} berhasil dikurangi`, 'success');
+        fetchData(false);
+      } else {
+        // Fallback to reduce from local storage if no backend asset
+        const localBrandsStr = localStorage.getItem('spil_category_brands');
+        if (localBrandsStr) {
+          const parsed = JSON.parse(localBrandsStr);
+          const catKey = (item.category_name || '').toLowerCase();
+          if (parsed[catKey]) {
+            const existingBrand = parsed[catKey].find(b => 
+              (b.brand || '').toLowerCase() === (item.brand || '').toLowerCase() &&
+              (b.model_number || '').toLowerCase() === (item.model_number || '').toLowerCase()
+            );
+            if (existingBrand && existingBrand.stock > 0) {
+              existingBrand.stock -= 1;
+              localStorage.setItem('spil_category_brands', JSON.stringify(parsed));
+              showToast(`1 Stok ${item.brand || ''} berhasil dikurangi (lokal)`, 'success');
+              fetchData(false);
+              return;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      showToast('Gagal mengurangi stok', 'error');
+    }
+  };
+
   const handleAddStockSubmit = async (e) => {
     e.preventDefault();
     if (!addStockModal || stockToAdd <= 0) return;
@@ -315,6 +486,25 @@ const InventoryPage = () => {
         model_number: addStockModal.model_number || 'Standard',
         quantity: parseInt(stockToAdd)
       });
+      
+      // Update local storage to keep it in sync
+      const localBrandsStr = localStorage.getItem('spil_category_brands');
+      if (localBrandsStr) {
+        try {
+          const parsed = JSON.parse(localBrandsStr);
+          const catKey = (addStockModal.category_name || '').toLowerCase();
+          if (parsed[catKey]) {
+            const existingBrand = parsed[catKey].find(b => 
+              (b.brand || '').toLowerCase() === (addStockModal.brand || '').toLowerCase() &&
+              (b.model_number || '').toLowerCase() === (addStockModal.model_number || '').toLowerCase()
+            );
+            if (existingBrand) {
+              existingBrand.stock = (parseInt(existingBrand.stock) || 0) + parseInt(stockToAdd);
+              localStorage.setItem('spil_category_brands', JSON.stringify(parsed));
+            }
+          }
+        } catch(e) {}
+      }
       
       showToast(`Berhasil menambah ${stockToAdd} stok untuk ${addStockModal.brand}`, 'success');
       setAddStockModal(null);
@@ -328,12 +518,60 @@ const InventoryPage = () => {
 
   const handleRestoreDamaged = async (item) => {
     try {
-      await restoreAsset({
-        asset_id: item.asset_id || item.id,
-        category_id: item.category_id,
-        brand: item.brand,
-        model_number: item.model_number
-      });
+      if (item.is_local) {
+        // Remove from spil_damaged_inventory
+        const localDamagedStr = localStorage.getItem('spil_damaged_inventory');
+        if (localDamagedStr) {
+          try {
+            const parsed = JSON.parse(localDamagedStr);
+            const originalData = item.original_local_data;
+            const updatedDamaged = parsed.filter(d => 
+              !(d.category_id === originalData.category_id && 
+                d.brand === originalData.brand && 
+                d.model_number === originalData.model_number && 
+                d.unassigned_at === originalData.unassigned_at)
+            );
+            localStorage.setItem('spil_damaged_inventory', JSON.stringify(updatedDamaged));
+          } catch(e) { console.error(e) }
+        }
+        
+        // Add back to spil_category_brands
+        const localBrandsStr = localStorage.getItem('spil_category_brands');
+        if (localBrandsStr) {
+          try {
+            const parsed = JSON.parse(localBrandsStr);
+            const catKey = (item.category_name || '').toLowerCase();
+            if (!parsed[catKey]) parsed[catKey] = [];
+            
+            const existingBrand = parsed[catKey].find(b => 
+              (b.brand || '').toLowerCase() === (item.brand || '').toLowerCase() &&
+              (b.model_number || '').toLowerCase() === (item.model_number || '').toLowerCase()
+            );
+            
+            if (existingBrand) {
+              existingBrand.stock = (parseInt(existingBrand.stock) || 0) + 1;
+            } else {
+              parsed[catKey].push({
+                id: `b_${Date.now()}`,
+                category_id: item.category_id,
+                brand: item.brand,
+                model_number: item.model_number,
+                stock: 1,
+                min_stock: 1,
+                warranty_months: 0
+              });
+            }
+            localStorage.setItem('spil_category_brands', JSON.stringify(parsed));
+          } catch(e) { console.error(e) }
+        }
+      } else {
+        await restoreAsset({
+          asset_id: item.asset_id || item.id,
+          category_id: item.category_id,
+          brand: item.brand,
+          model_number: item.model_number
+        });
+      }
 
       showToast('Barang berhasil diperbaiki & masuk ke Siap Pakai', 'success');
       await fetchData(false);
@@ -347,7 +585,25 @@ const InventoryPage = () => {
     if (!confirmDeleteDamaged) return;
     try {
       const item = confirmDeleteDamaged;
-      await deleteAsset(item.id);
+      
+      if (item.is_local) {
+        const localDamagedStr = localStorage.getItem('spil_damaged_inventory');
+        if (localDamagedStr) {
+          try {
+            const parsed = JSON.parse(localDamagedStr);
+            const originalData = item.original_local_data;
+            const updatedDamaged = parsed.filter(d => 
+              !(d.category_id === originalData.category_id && 
+                d.brand === originalData.brand && 
+                d.model_number === originalData.model_number && 
+                d.unassigned_at === originalData.unassigned_at)
+            );
+            localStorage.setItem('spil_damaged_inventory', JSON.stringify(updatedDamaged));
+          } catch(e) { console.error(e) }
+        }
+      } else {
+        await deleteAsset(item.id);
+      }
 
       showToast('Barang rusak berhasil dibuang', 'success');
       setConfirmDeleteDamaged(null);
@@ -698,7 +954,7 @@ const InventoryPage = () => {
                     </button>
                   </div>
                 ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
+                  <div className="mobile-grid-1" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
                     {filteredGood.filter(b => String(b.category_id) === String(selectedCategoryView.id) || (b.category_name || '').toLowerCase() === (selectedCategoryView.name || '').toLowerCase()).map(item => {
                       const isLowStock = item.stock <= (item.min_stock || 0);
                       return (
@@ -784,18 +1040,55 @@ const InventoryPage = () => {
                             </div>
                           </div>
 
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); setAddStockModal(item); }}
-                            style={{ 
-                              width: '100%', padding: '12px', borderRadius: '10px', 
-                              background: '#15803d', color: 'white', border: 'none',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-                              fontWeight: '800', fontSize: '0.9rem', cursor: 'pointer',
-                              boxShadow: '0 4px 12px rgba(21, 128, 61, 0.25)'
-                            }}
-                          >
-                            <Plus size={18} /> Tambah Stok
-                          </button>
+                          <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); setAddStockModal(item); }}
+                              style={{ 
+                                flex: 1, padding: '10px', borderRadius: '10px', 
+                                background: '#f8fafc', color: '#475569', border: '1px solid #e2e8f0',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                                fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer',
+                                transition: 'all 0.2s',
+                              }}
+                              onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
+                              onMouseLeave={(e) => e.currentTarget.style.background = '#f8fafc'}
+                              title="Input manual banyak stok sekaligus"
+                            >
+                              <Plus size={16} /> Stok Masal
+                            </button>
+
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              <button
+                                onClick={(e) => handleQuickReduceStock(item, e)}
+                                disabled={item.stock <= 0}
+                                style={{ 
+                                  width: '42px', height: '100%', borderRadius: '10px', 
+                                  background: item.stock <= 0 ? '#f8fafc' : '#fee2e2', 
+                                  color: item.stock <= 0 ? '#cbd5e1' : '#ef4444', 
+                                  border: item.stock <= 0 ? '1px solid #e2e8f0' : 'none',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                                  cursor: item.stock <= 0 ? 'not-allowed' : 'pointer',
+                                  transition: 'all 0.2s',
+                                }}
+                                title="Kurangi 1 Stok"
+                              >
+                                <Minus size={18} />
+                              </button>
+                              
+                              <button 
+                                onClick={(e) => handleQuickAddStock(item, e)}
+                                style={{ 
+                                  width: '42px', height: '100%', borderRadius: '10px', 
+                                  background: '#dcfce7', color: '#22c55e', border: 'none',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                                  cursor: 'pointer', transition: 'all 0.2s',
+                                }}
+                                title="Tambah 1 Stok"
+                              >
+                                <Plus size={18} />
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       );
                     })}
@@ -965,7 +1258,7 @@ const InventoryPage = () => {
                 <p>Tidak ada barang rusak di inventori saat ini.</p>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
+              <div className="mobile-grid-1" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
                 {filteredDamaged.map(item => (
                   <div key={item.id} className="neu-raised-sm" style={{ padding: '16px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '12px', background: 'var(--color-bg)', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>

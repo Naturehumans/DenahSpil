@@ -7,7 +7,7 @@ const LeftSidebar = ({
   buildings = [], currentBuilding, onSelectBuilding,
   floors = [], currentFloor, onSelectFloor, 
   categories = [], equipments = [],
-  selectedCategoryId, onSelectCategory
+  selectedCategoryIds = [], onSelectCategory
 }) => {
   const [search, setSearch] = useState('');
   const [expandedBuildingId, setExpandedBuildingId] = React.useState(null);
@@ -149,12 +149,12 @@ const LeftSidebar = ({
             
             <button 
               onClick={() => onSelectCategory(null)}
-              className={!selectedCategoryId ? "neu-inset" : "neu-raised-sm"} 
+              className={selectedCategoryIds.length === 0 ? "neu-inset" : "neu-raised-sm"} 
               style={{ 
                 padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 cursor: 'pointer', border: 'none', background: 'transparent', borderRadius: '12px',
-                color: !selectedCategoryId ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                fontWeight: !selectedCategoryId ? '600' : '500'
+                color: selectedCategoryIds.length === 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                fontWeight: selectedCategoryIds.length === 0 ? '600' : '500'
               }}
             >
               <span>Semua Barang</span>
@@ -163,12 +163,12 @@ const LeftSidebar = ({
 
             {filteredCategories.map(cat => {
               const count = categoryCounts[cat.id] || 0;
-              const isActive = selectedCategoryId === cat.id;
+              const isActive = selectedCategoryIds.includes(cat.id);
               
               return (
                 <button 
                   key={cat.id} 
-                  onClick={() => onSelectCategory(isActive ? null : cat.id)} 
+                  onClick={() => onSelectCategory(cat.id)} 
                   className={isActive ? "neu-inset" : "neu-raised-sm"} 
                   style={{ 
                     padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px',

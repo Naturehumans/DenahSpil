@@ -27,7 +27,7 @@ const MainLayout = ({
   onEquipmentDoubleClick,
   highlightedSlotId = null,
   isEditMode = false,
-  selectedCategoryId,
+  selectedCategoryIds,
   onSelectCategory,
   slots = [],
   onDeleteSlot,
@@ -75,6 +75,12 @@ const MainLayout = ({
               isOpen={leftOpen} 
               onClose={() => setLeftOpen(false)} 
               categories={categories}
+              buildings={buildings}
+              currentBuilding={currentBuilding}
+              onSelectBuilding={onSelectBuilding}
+              floors={floors}
+              currentFloor={currentFloor}
+              onSelectFloor={onSelectFloor}
             />
           ) : (
             <LeftSidebar 
@@ -88,7 +94,7 @@ const MainLayout = ({
               onSelectFloor={onSelectFloor}
               equipments={equipments}
               categories={categories}
-              selectedCategoryId={selectedCategoryId}
+              selectedCategoryIds={selectedCategoryIds}
               onSelectCategory={onSelectCategory}
             />
           )}
