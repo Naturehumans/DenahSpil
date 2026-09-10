@@ -4,7 +4,9 @@ import { Package, X } from 'lucide-react';
 const EditLeftSidebar = ({ 
   isOpen, onClose, categories = [],
   buildings = [], currentBuilding, onSelectBuilding,
-  floors = [], currentFloor, onSelectFloor
+  floors = [], currentFloor, onSelectFloor,
+  isDrawingPolygon, setIsDrawingPolygon,
+  currentPolygon, setCurrentPolygon, onPolygonComplete
 }) => {
   const [expandedBuildingId, setExpandedBuildingId] = React.useState(null);
 
@@ -141,6 +143,88 @@ const EditLeftSidebar = ({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
+        {!isDrawingPolygon ? (
+          <button
+            className="neu-raised-sm"
+            onClick={() => setIsDrawingPolygon(true)}
+            style={{
+              padding: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              background: 'transparent',
+              border: 'none',
+              borderRadius: '12px',
+              cursor: 'pointer',
+              color: 'var(--color-text-primary)',
+              fontWeight: '600',
+              marginBottom: '8px',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 3h6v6H3z"></path>
+              <path d="M15 3h6v6h-6z"></path>
+              <path d="M15 15h6v6h-6z"></path>
+              <path d="M3 15h6v6H3z"></path>
+              <path d="M9 6h6"></path>
+              <path d="M9 18h6"></path>
+              <path d="M6 9v6"></path>
+              <path d="M18 9v6"></path>
+            </svg>
+            Buat Ruangan / Area
+          </button>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
+            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', textAlign: 'center', margin: 0 }}>
+              Klik pada denah untuk menggambar batas area. (Titik: {currentPolygon?.length || 0})
+            </p>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                className="neu-raised-sm"
+                onClick={() => {
+                  setIsDrawingPolygon(false);
+                  setCurrentPolygon([]);
+                }}
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  background: 'transparent',
+                  border: '1px solid var(--color-danger, #ef4444)',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  color: 'var(--color-danger, #ef4444)',
+                  fontWeight: '600',
+                }}
+              >
+                Batal
+              </button>
+              <button
+                className="neu-raised-sm"
+                disabled={!currentPolygon || currentPolygon.length < 3}
+                onClick={() => {
+                  if (currentPolygon && currentPolygon.length >= 3) {
+                    onPolygonComplete(currentPolygon);
+                  }
+                }}
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  background: (!currentPolygon || currentPolygon.length < 3) ? 'rgba(0,0,0,0.1)' : 'var(--color-primary)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: (!currentPolygon || currentPolygon.length < 3) ? 'not-allowed' : 'pointer',
+                  color: (!currentPolygon || currentPolygon.length < 3) ? 'var(--color-text-muted)' : 'white',
+                  fontWeight: '600',
+                }}
+              >
+                Simpan
+              </button>
+            </div>
+          </div>
+        )}
+
         {categories.map(cat => {
           let availableStock = cat.available_stock;
           if (availableStock === undefined || availableStock === null) {

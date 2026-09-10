@@ -11,6 +11,7 @@ import InventoryManagement from '../components/Forms/InventoryManagement';
 import ConfirmModal from '../components/UI/ConfirmModal';
 import { useToast } from '../contexts/ToastContext';
 import Skeleton from '../components/UI/Skeleton';
+import Input from '../components/UI/Input';
 
 // API imports
 import { getBuildings, createBuilding, updateBuilding, deleteBuilding } from '../api/buildings';
@@ -34,7 +35,9 @@ import {
   moveItemBetweenSlots, 
   unassignItemFromSlot 
 } from '../api/slots';
+import { getRoomPolygonsByFloor, createRoomPolygon, deleteRoomPolygon } from '../api/roomPolygons';
 import api from '../api/axios';
+import { getRoomNameFromCoordinates, isPointInPolygon } from '../utils/geometry';
 
 const DashboardPage = () => {
   const navigate = useNavigate();
@@ -56,6 +59,12 @@ const DashboardPage = () => {
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [newEqPos, setNewEqPos] = useState({ x: 400, y: 300 });
   const [isEditMode, setIsEditMode] = useState(false);
+  const [roomPolygons, setRoomPolygons] = useState([]);
+  const [isDrawingPolygon, setIsDrawingPolygon] = useState(false);
+  const [currentPolygon, setCurrentPolygon] = useState([]);
+  const [confirmPolygonSave, setConfirmPolygonSave] = useState(null);
+  const [polygonName, setPolygonName] = useState('');
+  const [selectedRoomPolygonDetail, setSelectedRoomPolygonDetail] = useState(null);
   const [confirmDeleteEq, setConfirmDeleteEq] = useState(false);
   const [confirmSlotDrop, setConfirmSlotDrop] = useState(null);
   const [confirmAssignItem, setConfirmAssignItem] = useState(null);
@@ -98,13 +107,15 @@ const DashboardPage = () => {
           setCurrentFloor(activeFloor);
           localStorage.setItem('spil_active_floor_id', activeFloor.id);
           
-          // Fetch equipments and slots concurrently
-          const [eqs, flrSlots] = await Promise.all([
+          // Fetch equipments, slots, and room polygons concurrently
+          const [eqs, flrSlots, polys] = await Promise.all([
             getEquipmentsByFloor(activeFloor.id),
-            getSlotsByFloor(activeFloor.id)
+            getSlotsByFloor(activeFloor.id),
+            getRoomPolygonsByFloor(activeFloor.id).catch(() => [])
           ]);
           setEquipments(eqs);
           setSlots(flrSlots);
+          setRoomPolygons(polys);
         }
       }
 
@@ -151,6 +162,8 @@ const DashboardPage = () => {
       setEquipments(eqs);
       const flrSlots = await getSlotsByFloor(floor.id);
       setSlots(flrSlots);
+      const polys = await getRoomPolygonsByFloor(floor.id).catch(() => []);
+      setRoomPolygons(polys);
       setSelectedCategoryIds([]); // Reset category filter on floor change
     } catch (error) {
       showToast('Gagal memuat data barang untuk lantai ini', 'error');
@@ -175,6 +188,7 @@ const DashboardPage = () => {
         setCurrentFloor(null);
         setEquipments([]);
         setSlots([]);
+        setRoomPolygons([]);
         setSelectedCategoryIds([]);
       }
     } catch (error) {
@@ -243,7 +257,8 @@ const DashboardPage = () => {
   const confirmCreateSlot = async () => {
     if (!currentFloor || !confirmSlotDrop) return;
     try {
-      const roomName = (confirmSlotDrop.roomName || '').trim() || 'Ruang Utama';
+      const detectedRoom = getRoomNameFromCoordinates({x: confirmSlotDrop.x, y: confirmSlotDrop.y}, roomPolygons);
+      const roomName = (confirmSlotDrop.roomName || '').trim() || detectedRoom || 'Ruang Utama';
       const newSlot = await createSlot(currentFloor.id, {
         category_id: confirmSlotDrop.category.id,
         position_x: confirmSlotDrop.x,
@@ -253,12 +268,47 @@ const DashboardPage = () => {
       newSlot.category = confirmSlotDrop.category; // optimistic
       newSlot.room_name = roomName;
       setSlots(prev => [...prev, newSlot]);
-      showToast(`Slot ${confirmSlotDrop.category.name} di ${roomName} berhasil ditempatkan`, 'success');
+      showToast(detectedRoom ? `Slot ${confirmSlotDrop.category.name} berhasil ditempatkan di area ${detectedRoom}` : `Slot ${confirmSlotDrop.category.name} berhasil ditempatkan`, 'success');
     } catch (err) {
       showToast('Gagal membuat slot', 'error');
     } finally {
       setConfirmSlotDrop(null);
     }
+  };
+
+  const handlePolygonComplete = (coordinates) => {
+    setConfirmPolygonSave(coordinates);
+  };
+
+  const handleRoomPolygonClick = (polygon) => {
+    if (!polygon || !polygon.coordinates) return;
+    
+    // Find all slots physically located inside this polygon
+    const slotsInRoom = slots.filter(s => isPointInPolygon({ x: s.position_x, y: s.position_y }, polygon.coordinates));
+    const emptySlots = slotsInRoom.filter(s => !s.equipment && !s.equipment_id);
+    const filledSlots = slotsInRoom.filter(s => s.equipment || s.equipment_id);
+
+    setSelectedRoomPolygonDetail({
+      polygon,
+      slotsInRoom,
+      emptySlots,
+      filledSlots
+    });
+  };
+
+  const confirmSavePolygon = async (roomName) => {
+    try {
+      const polygonData = { name: roomName, coordinates: confirmPolygonSave };
+      const res = await createRoomPolygon(currentFloor.id, polygonData);
+      setRoomPolygons(prev => [...prev, res]);
+      showToast(`Area ${polygonData.name} berhasil disimpan`, 'success');
+      setCurrentPolygon([]);
+    } catch (err) {
+      showToast('Gagal menyimpan area ruangan', 'error');
+    }
+    setConfirmPolygonSave(null);
+    setPolygonName('');
+    setIsDrawingPolygon(false);
   };
 
   const handleItemDropOnSlot = async (categoryId, slotId) => {
@@ -676,10 +726,14 @@ const DashboardPage = () => {
       }
     } else {
       // Optimistic update for moving empty slot position on floorplan
-      setSlots(prev => prev.map(s => s.id === id ? { ...s, position_x: Math.round(x), position_y: Math.round(y) } : s));
+      const sourceSlot = slots.find(s => s.id === id);
+      const detectedRoom = getRoomNameFromCoordinates({x, y}, roomPolygons);
+      const newRoomName = detectedRoom || (sourceSlot ? sourceSlot.room_name : '');
+      
+      setSlots(prev => prev.map(s => s.id === id ? { ...s, position_x: Math.round(x), position_y: Math.round(y), room_name: newRoomName } : s));
       try {
-        await updateSlotPosition(id, Math.round(x), Math.round(y));
-        showToast('Posisi slot berhasil diperbarui', 'success');
+        await updateSlotPosition(id, Math.round(x), Math.round(y), newRoomName);
+        showToast(detectedRoom ? `Posisi slot berhasil dipindah ke area ${detectedRoom}` : 'Posisi slot berhasil diperbarui', 'success');
       } catch (err) {
         console.error("Error updating slot position:", err);
         // Revert optimistic update
@@ -1083,6 +1137,11 @@ const DashboardPage = () => {
       onEquipmentDoubleClick={handleEquipmentDoubleClick}
       highlightedSlotId={highlightedSlotId}
       isEditMode={isEditMode}
+      isDrawingPolygon={isDrawingPolygon}
+      setIsDrawingPolygon={setIsDrawingPolygon}
+      currentPolygon={currentPolygon}
+      setCurrentPolygon={setCurrentPolygon}
+      onPolygonComplete={handlePolygonComplete}
       selectedCategoryIds={selectedCategoryIds}
       onSelectCategory={(id) => {
         if (id === null) {
@@ -1183,6 +1242,21 @@ const DashboardPage = () => {
         onExport={handleExport}
         activeMobileSlotTemplate={activeMobileSlotTemplate}
         onCancelMobilePlacement={() => setActiveMobileSlotTemplate(null)}
+        roomPolygons={roomPolygons}
+        isDrawingPolygon={isDrawingPolygon}
+        currentPolygon={currentPolygon}
+        setCurrentPolygon={setCurrentPolygon}
+        onPolygonComplete={handlePolygonComplete}
+        onPolygonClick={handleRoomPolygonClick}
+        onPolygonDelete={async (polygonId) => {
+          try {
+            await deleteRoomPolygon(polygonId);
+            setRoomPolygons(prev => prev.filter(p => p.id !== polygonId));
+            showToast('Area ruangan dihapus', 'success');
+          } catch (err) {
+            showToast('Gagal menghapus area ruangan', 'error');
+          }
+        }}
       />
 
       <Modal 
@@ -1728,8 +1802,6 @@ const DashboardPage = () => {
         );})()}
       </Modal>
 
-
-
       <Modal 
         isOpen={activeModal === 'unassign_destination' || activeModal === 'delete_equipment_destination'} 
         onClose={() => setActiveModal('equipment_detail')} 
@@ -1745,10 +1817,10 @@ const DashboardPage = () => {
               Tanggal Pelepasan / Pembaruan:
             </label>
             <input 
-              type="date" 
+              type="date"
+              className="neu-inset"
               value={unassignDate}
               onChange={(e) => setUnassignDate(e.target.value)}
-              className="neu-inset"
               style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.9rem' }}
             />
           </div>
@@ -1811,6 +1883,157 @@ const DashboardPage = () => {
         </div>
       </Modal>
 
+      <Modal
+        isOpen={!!confirmPolygonSave}
+        onClose={() => {
+          setConfirmPolygonSave(null);
+          setPolygonName('');
+        }}
+        title="Simpan Area Ruangan"
+      >
+        <div style={{ padding: '8px' }}>
+          <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem', marginBottom: '16px' }}>
+            Masukkan nama untuk area ruangan yang baru saja Anda gambar.
+          </p>
+          <div style={{ marginBottom: '24px' }}>
+            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text-primary)', marginBottom: '8px' }}>
+              Nama Ruangan / Area
+            </label>
+            <Input
+              placeholder="Contoh: RUANG NIKEN"
+              value={polygonName}
+              onChange={(e) => setPolygonName(e.target.value)}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && polygonName.trim()) {
+                  confirmSavePolygon(polygonName.trim());
+                }
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+            <button
+              className="neu-raised"
+              onClick={() => {
+                setConfirmPolygonSave(null);
+                setPolygonName('');
+              }}
+              style={{
+                padding: '10px 24px',
+                border: 'none',
+                background: 'transparent',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                color: 'var(--color-text-secondary)',
+                fontWeight: '600'
+              }}
+            >
+              Batal
+            </button>
+            <button
+              className="neu-action-btn"
+              disabled={!polygonName.trim()}
+              onClick={() => confirmSavePolygon(polygonName.trim())}
+              style={{
+                padding: '10px 24px',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: polygonName.trim() ? 'pointer' : 'not-allowed',
+                background: polygonName.trim() ? 'var(--color-primary)' : 'rgba(0,0,0,0.1)',
+                color: polygonName.trim() ? 'white' : 'var(--color-text-muted)',
+                fontWeight: '600'
+              }}
+            >
+              Simpan Area
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={!!selectedRoomPolygonDetail}
+        onClose={() => setSelectedRoomPolygonDetail(null)}
+        title="Detail Area Ruangan"
+      >
+        {selectedRoomPolygonDetail && (
+          <div style={{ padding: '8px' }}>
+            <h3 style={{ fontSize: '1.25rem', color: 'var(--color-primary)', marginBottom: '16px' }}>
+              {selectedRoomPolygonDetail.polygon.name}
+            </h3>
+            
+            <div style={{ background: 'var(--color-bg-secondary)', padding: '16px', borderRadius: '12px', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ color: 'var(--color-text-secondary)' }}>Total Titik / Slot:</span>
+                <span style={{ fontWeight: '600', color: 'var(--color-text-primary)' }}>{selectedRoomPolygonDetail.slotsInRoom.length}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ color: 'var(--color-text-secondary)' }}>Slot Kosong:</span>
+                <span style={{ fontWeight: '600', color: 'var(--color-text-primary)' }}>{selectedRoomPolygonDetail.emptySlots.length}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--color-text-secondary)' }}>Slot Terisi (Barang):</span>
+                <span style={{ fontWeight: '600', color: 'var(--color-text-primary)' }}>{selectedRoomPolygonDetail.filledSlots.length}</span>
+              </div>
+            </div>
+
+            {selectedRoomPolygonDetail.filledSlots.length > 0 && (
+              <div style={{ marginBottom: '24px' }}>
+                <h4 style={{ fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text-primary)', marginBottom: '8px' }}>Daftar Barang di Area Ini:</h4>
+                <div style={{ maxHeight: '150px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {selectedRoomPolygonDetail.filledSlots.map(slot => (
+                    <div key={slot.id} style={{ background: 'var(--color-bg)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--color-border)', fontSize: '0.875rem' }}>
+                      <span style={{ fontWeight: '600' }}>{slot.category?.name || slot.equipment?.category?.name || 'Item'}</span>
+                      {slot.equipment && (
+                        <span style={{ color: 'var(--color-text-secondary)', marginLeft: '8px' }}>
+                          ({slot.equipment.asset_id || slot.equipment.name})
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              {isEditMode && (
+                <button
+                  className="neu-raised-sm"
+                  onClick={() => {
+                    setActiveModal('delete_polygon_confirm');
+                  }}
+                  style={{
+                    padding: '10px 24px',
+                    border: '1px solid var(--color-danger)',
+                    background: 'transparent',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    color: 'var(--color-danger)',
+                    fontWeight: '600'
+                  }}
+                >
+                  Hapus Area
+                </button>
+              )}
+              <button
+                className="neu-raised"
+                onClick={() => setSelectedRoomPolygonDetail(null)}
+                style={{
+                  padding: '10px 24px',
+                  border: 'none',
+                  background: 'var(--color-primary)',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  color: 'white',
+                  fontWeight: '600'
+                }}
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <ConfirmModal 
         isOpen={activeModal === 'delete_slot_confirm'}
         onClose={() => { setActiveModal(null); setSelectedSlot(null); }}
@@ -1821,6 +2044,26 @@ const DashboardPage = () => {
         }}
         title="Hapus Titik Slot"
         message="Apakah Anda yakin ingin menghapus titik slot kosong ini?"
+      />
+
+      <ConfirmModal 
+        isOpen={activeModal === 'delete_polygon_confirm'}
+        onClose={() => setActiveModal(null)}
+        onConfirm={async () => {
+          if (selectedRoomPolygonDetail) {
+            try {
+              await deleteRoomPolygon(selectedRoomPolygonDetail.polygon.id);
+              setRoomPolygons(prev => prev.filter(p => p.id !== selectedRoomPolygonDetail.polygon.id));
+              showToast('Area ruangan berhasil dihapus', 'success');
+              setSelectedRoomPolygonDetail(null);
+            } catch (err) {
+              showToast('Gagal menghapus area', 'error');
+            }
+          }
+          setActiveModal(null);
+        }}
+        title="Hapus Area Ruangan"
+        message={`Apakah Anda yakin ingin menghapus area ruangan "${selectedRoomPolygonDetail?.polygon?.name}"?`}
       />
 
       <ConfirmModal 

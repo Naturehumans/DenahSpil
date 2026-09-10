@@ -23,3 +23,4 @@ class Floor(Base):
     building = relationship("Building", back_populates="floors")
     equipments = relationship("Equipment", back_populates="floor", cascade="all, delete-orphan")
     slots = relationship("SlotTemplate", back_populates="floor", cascade="all, delete-orphan")
+    room_polygons = relationship("RoomPolygon", back_populates="floor", cascade="all, delete-orphan")

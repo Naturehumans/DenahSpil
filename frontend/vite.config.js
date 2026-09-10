@@ -39,13 +39,7 @@ export default defineConfig({
   ],
   build: {
     rollupOptions: {
-      output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          ui: ['framer-motion', 'lucide-react', 'konva', 'react-konva'],
-          utils: ['axios', 'xlsx']
-        }
-      }
+      output: {}
     }
   },
   server: {

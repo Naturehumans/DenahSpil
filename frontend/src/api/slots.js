@@ -15,14 +15,18 @@ export const createSlot = async (floorId, data) => {
   return response.data;
 };
 
-export const updateSlotPosition = async (slotId, positionX, positionY) => {
+export const updateSlotPosition = async (slotId, positionX, positionY, roomName = undefined) => {
   let x = positionX;
   let y = positionY;
   if (typeof positionX === 'object' && positionX !== null) {
     x = positionX.position_x ?? positionX.x;
     y = positionX.position_y ?? positionX.y;
   }
-  const response = await api.patch(`/slots/${slotId}/position?position_x=${x}&position_y=${y}`);
+  let url = `/slots/${slotId}/position?position_x=${x}&position_y=${y}`;
+  if (roomName !== undefined) {
+    url += `&room_name=${encodeURIComponent(roomName)}`;
+  }
+  const response = await api.patch(url);
   return response.data;
 };
 

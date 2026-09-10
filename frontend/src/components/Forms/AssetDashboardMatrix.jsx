@@ -17,6 +17,7 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
   const [slots, setSlots] = useState([]);
   const [logs, setLogs] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [expandedBuildings, setExpandedBuildings] = useState({});
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -170,6 +171,45 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
   });
 
   const grandTotal = Object.values(categoryTotals).reduce((a, b) => a + b, 0);
+
+  // --- Pivot Table Data Preparation ---
+  const buildingsMap = new Map();
+  filteredLocations.forEach(loc => {
+    if (!buildingsMap.has(loc.buildingName)) {
+      buildingsMap.set(loc.buildingName, {
+        name: loc.buildingName,
+        floors: [],
+        isOnlyBuilding: false
+      });
+    }
+    if (loc.floorName) {
+      buildingsMap.get(loc.buildingName).floors.push(loc);
+    } else {
+      buildingsMap.get(loc.buildingName).isOnlyBuilding = true;
+      buildingsMap.get(loc.buildingName).floors.push(loc);
+    }
+  });
+  const groupedBuildings = Array.from(buildingsMap.values());
+
+  const buildingMatrix = {};
+  groupedBuildings.forEach(bldg => {
+    buildingMatrix[bldg.name] = {};
+    displayCategories.forEach(cat => {
+      buildingMatrix[bldg.name][cat.id] = 0;
+      bldg.floors.forEach(floorLoc => {
+        buildingMatrix[bldg.name][cat.id] += (matrix[floorLoc.name]?.[cat.id] || 0);
+      });
+    });
+  });
+
+  const buildingTotals = {};
+  groupedBuildings.forEach(bldg => {
+    buildingTotals[bldg.name] = 0;
+    bldg.floors.forEach(floorLoc => {
+      buildingTotals[bldg.name] += (locationTotals[floorLoc.name] || 0);
+    });
+  });
+  // ------------------------------------
 
   // Top Location with most assets
   let topLocationName = '-';
@@ -390,48 +430,113 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
               </tr>
             </thead>
             <tbody>
-              {filteredLocations.length === 0 ? (
+              {groupedBuildings.length === 0 ? (
                 <tr>
                   <td colSpan={displayCategories.length + 2} style={{ padding: '30px', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
                     Tidak ada lokasi / area yang ditemukan.
                   </td>
                 </tr>
               ) : (
-                filteredLocations.map((loc, idx) => {
-                  const locTotal = locationTotals[loc.name] || 0;
+                groupedBuildings.map((bldg, idx) => {
+                  const bldgTotal = buildingTotals[bldg.name] || 0;
+                  const isExpanded = expandedBuildings[bldg.name];
+                  const hasRealFloors = bldg.floors.length > 0 && !bldg.isOnlyBuilding;
                   const isEven = idx % 2 === 0;
+                  
                   return (
-                    <tr key={loc.name} style={{ background: isEven ? '#FAFAFA' : '#FFFFFF', borderBottom: '1px solid #E2E8F0' }}>
-                      <td style={{
-                        padding: '11px 16px', fontWeight: '700', color: '#1E293B',
-                        borderRight: '2px solid #E2E8F0', whiteSpace: 'nowrap'
-                      }}>
-                        {loc.name}
-                      </td>
-
-                      {displayCategories.map(cat => {
-                        const count = matrix[loc.name]?.[cat.id] || 0;
+                    <React.Fragment key={bldg.name}>
+                      <tr 
+                        onClick={() => {
+                          if (hasRealFloors) {
+                            setExpandedBuildings(prev => ({
+                              ...prev,
+                              [bldg.name]: !prev[bldg.name]
+                            }));
+                          }
+                        }} 
+                        style={{ 
+                          background: isEven ? '#FAFAFA' : '#FFFFFF', 
+                          borderBottom: '1px solid #E2E8F0', 
+                          cursor: hasRealFloors ? 'pointer' : 'default' 
+                        }}
+                      >
+                        <td style={{
+                          padding: '11px 16px', fontWeight: '800', color: '#1E293B',
+                          borderRight: '2px solid #E2E8F0', whiteSpace: 'nowrap',
+                          display: 'flex', alignItems: 'center', gap: '8px'
+                        }}>
+                          {hasRealFloors ? (
+                            <span style={{ 
+                              display: 'inline-block',
+                              fontSize: '10px', 
+                              transition: 'transform 0.2s', 
+                              transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' 
+                            }}>
+                              ▶
+                            </span>
+                          ) : <span style={{ width: '10px' }}></span>}
+                          {bldg.name}
+                        </td>
+                        
+                        {displayCategories.map(cat => {
+                          const count = buildingMatrix[bldg.name]?.[cat.id] || 0;
+                          return (
+                            <td key={cat.id} style={{
+                              padding: '10px 12px', textAlign: 'center',
+                              fontWeight: count > 0 ? '800' : '500',
+                              color: count > 0 ? '#0F172A' : '#94A3B8',
+                              background: count > 0 ? 'rgba(58, 149, 66, 0.08)' : 'transparent',
+                              borderRight: '1px solid #F1F5F9'
+                            }}>
+                              {count}
+                            </td>
+                          );
+                        })}
+                        
+                        <td style={{
+                          padding: '10px 14px', textAlign: 'center', fontWeight: '800',
+                          color: 'var(--color-primary)', background: isEven ? '#F1F5F9' : '#F8FAFC',
+                          borderLeft: '2px solid #E2E8F0'
+                        }}>
+                          {bldgTotal}
+                        </td>
+                      </tr>
+                      
+                      {isExpanded && hasRealFloors && bldg.floors.map((floorLoc, fIdx) => {
+                        const locTotal = locationTotals[floorLoc.name] || 0;
                         return (
-                          <td key={cat.id} style={{
-                            padding: '10px 12px', textAlign: 'center',
-                            fontWeight: count > 0 ? '700' : '400',
-                            color: count > 0 ? '#0F172A' : '#94A3B8',
-                            background: count > 0 ? 'rgba(58, 149, 66, 0.06)' : 'transparent',
-                            borderRight: '1px solid #F1F5F9'
-                          }}>
-                            {count}
-                          </td>
+                          <tr key={floorLoc.name} style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                            <td style={{
+                              padding: '10px 16px 10px 36px', fontWeight: '600', color: '#475569',
+                              borderRight: '2px solid #E2E8F0', whiteSpace: 'nowrap', fontSize: '0.8rem',
+                              display: 'flex', alignItems: 'center'
+                            }}>
+                              <span style={{ width: '12px', height: '12px', borderLeft: '2px solid #CBD5E1', borderBottom: '2px solid #CBD5E1', marginRight: '8px', marginTop: '-12px' }}></span>
+                              {floorLoc.floorName || 'Tanpa Lantai'}
+                            </td>
+                            {displayCategories.map(cat => {
+                              const count = matrix[floorLoc.name]?.[cat.id] || 0;
+                              return (
+                                <td key={cat.id} style={{
+                                  padding: '8px 12px', textAlign: 'center',
+                                  fontWeight: count > 0 ? '600' : '400', fontSize: '0.8rem',
+                                  color: count > 0 ? '#334155' : '#94A3B8',
+                                  borderRight: '1px solid #F1F5F9'
+                                }}>
+                                  {count}
+                                </td>
+                              );
+                            })}
+                            <td style={{
+                              padding: '8px 14px', textAlign: 'center', fontWeight: '700', fontSize: '0.8rem',
+                              color: '#334155', borderLeft: '2px solid #E2E8F0'
+                            }}>
+                              {locTotal}
+                            </td>
+                          </tr>
                         );
                       })}
-
-                      <td style={{
-                        padding: '10px 14px', textAlign: 'center', fontWeight: '800',
-                        color: 'var(--color-primary)', background: isEven ? '#F1F5F9' : '#F8FAFC',
-                        borderLeft: '2px solid #E2E8F0'
-                      }}>
-                        {locTotal}
-                      </td>
-                    </tr>
+                    </React.Fragment>
                   );
                 })
               )}

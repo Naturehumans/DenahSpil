@@ -3,6 +3,7 @@ from .building import Building
 from .floor import Floor
 from .equipment_category import EquipmentCategory
 from .equipment import Equipment
-from .slot_template import SlotTemplate
-from .asset_inventory import AssetInventory
-from .inventory_history_log import InventoryHistoryLog
+from app.models.slot_template import SlotTemplate
+from app.models.asset_inventory import AssetInventory
+from app.models.inventory_history_log import InventoryHistoryLog
+from app.models.room_polygon import RoomPolygon

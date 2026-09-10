@@ -1,9 +1,10 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Stage, Layer, Image as KonvaImage, Rect, Line } from 'react-konva';
+import { Stage, Layer, Image as KonvaImage, Rect, Line, Circle, Text, Group } from 'react-konva';
 import useImage from 'use-image';
 import CanvasControls from './CanvasControls';
 import EquipmentNode from './EquipmentNode';
 import SlotNode from './SlotNode';
+import { getPolygonCentroid } from '../../utils/geometry';
 
 const FloorCanvas = ({ 
   imageUrl, 
@@ -21,7 +22,14 @@ const FloorCanvas = ({
   onExport,
   activeMobileSlotTemplate = null,
   onCancelMobilePlacement = null,
-  onCanvasClick
+  onCanvasClick,
+  roomPolygons = [],
+  isDrawingPolygon = false,
+  onPolygonComplete,
+  onPolygonDelete,
+  currentPolygon = [],
+  setCurrentPolygon,
+  onPolygonClick
 }) => {
   const containerRef = useRef(null);
   const stageRef = useRef(null);
@@ -61,6 +69,13 @@ const FloorCanvas = ({
       setShowGrid(false);
     }
   }, [isEditMode]);
+
+  // Clear polygon if drawing mode exits
+  useEffect(() => {
+    if (!isDrawingPolygon) {
+      setCurrentPolygon([]);
+    }
+  }, [isDrawingPolygon]);
 
   // Window resize observer to update canvas dimensions safely
   useEffect(() => {
@@ -488,6 +503,18 @@ const FloorCanvas = ({
       return;
     }
 
+    if (isDrawingPolygon && isEditMode) {
+      if (pointerPosition) {
+        const x = (pointerPosition.x - stageState.x) / stageState.scale;
+        const y = (pointerPosition.y - stageState.y) / stageState.scale;
+        
+        // If it's a double click or we click near the first point, complete polygon
+        // But double click event is handled separately. Let's just add point for single click.
+        setCurrentPolygon(prev => [...prev, { x, y }]);
+      }
+      return;
+    }
+
     // If clicked on empty area, deselect or trigger canvas click
     if (e.target === e.target.getStage() || e.target.attrs.id === 'bg-image' || e.target.attrs.id === 'grid-layer') {
       setSelectedId(null);
@@ -709,6 +736,86 @@ const FloorCanvas = ({
 
           {/* Grid Overlay */}
           {gridLines}
+
+          {/* Render Saved Polygons */}
+          {roomPolygons.map((polygon, index) => {
+            const points = polygon.coordinates.flatMap(p => [p.x, p.y]);
+            const centroid = getPolygonCentroid(polygon.coordinates);
+            
+            const POLYGON_COLORS = [
+              { stroke: "rgba(58, 149, 66, 0.8)", fill: "rgba(58, 149, 66, 0.15)" }, // Green
+              { stroke: "rgba(37, 99, 235, 0.8)", fill: "rgba(37, 99, 235, 0.15)" }, // Blue
+              { stroke: "rgba(220, 38, 38, 0.8)", fill: "rgba(220, 38, 38, 0.15)" }, // Red
+              { stroke: "rgba(217, 119, 6, 0.8)", fill: "rgba(217, 119, 6, 0.15)" }, // Orange
+              { stroke: "rgba(147, 51, 234, 0.8)", fill: "rgba(147, 51, 234, 0.15)" }, // Purple
+              { stroke: "rgba(13, 148, 136, 0.8)", fill: "rgba(13, 148, 136, 0.15)" }, // Teal
+              { stroke: "rgba(236, 72, 153, 0.8)", fill: "rgba(236, 72, 153, 0.15)" }, // Pink
+            ];
+            const colorTheme = POLYGON_COLORS[index % POLYGON_COLORS.length];
+
+            return (
+              <Group key={polygon.id}>
+                <Line
+                  points={points}
+                  closed={true}
+                  stroke={colorTheme.stroke}
+                  strokeWidth={2 / stageState.scale}
+                  fill={colorTheme.fill}
+                  onClick={(e) => {
+                    if (onPolygonClick) {
+                      e.cancelBubble = true;
+                      onPolygonClick(polygon);
+                    }
+                  }}
+                  onTap={(e) => {
+                    if (onPolygonClick) {
+                      e.cancelBubble = true;
+                      onPolygonClick(polygon);
+                    }
+                  }}
+                />
+                {centroid.x !== 0 && centroid.y !== 0 && (
+                  <Text
+                    x={centroid.x}
+                    y={centroid.y}
+                    text={polygon.name}
+                    fontSize={14 / stageState.scale}
+                    fontFamily="Inter, sans-serif"
+                    fill="rgba(0, 0, 0, 0.6)"
+                    align="center"
+                    verticalAlign="middle"
+                    offsetX={50} // Approximate center
+                    offsetY={7}
+                    listening={false}
+                  />
+                )}
+              </Group>
+            );
+          })}
+
+          {/* Render Currently Drawing Polygon */}
+          {currentPolygon.length > 0 && (
+            <Group>
+              <Line
+                points={currentPolygon.flatMap(p => [p.x, p.y])}
+                closed={currentPolygon.length >= 3}
+                stroke="rgba(37, 99, 235, 0.8)"
+                strokeWidth={2 / stageState.scale}
+                dash={[10 / stageState.scale, 5 / stageState.scale]}
+                fill={currentPolygon.length >= 3 ? "rgba(37, 99, 235, 0.2)" : null}
+              />
+              {currentPolygon.map((p, i) => (
+                <Circle
+                  key={i}
+                  x={p.x}
+                  y={p.y}
+                  radius={5 / stageState.scale}
+                  fill="rgba(37, 99, 235, 1)"
+                  listening={false}
+                />
+              ))}
+            </Group>
+          )}
 
           {/* Slots */}
           {slots.map((slot) => (

@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import engine, Base, AsyncSessionLocal
 from app.middleware.error_handler import error_handler_middleware
-from app.api import health, auth, buildings, floors, equipment_categories, equipments, export, slot_templates, inventory
+from app.api import health, auth, buildings, floors, equipment_categories, equipments, export, slot_templates, inventory, room_polygons
 
 # Create uploads directory if it doesn't exist
 os.makedirs("uploads/floor-plans", exist_ok=True)
@@ -118,6 +118,7 @@ app.include_router(equipments.router, prefix="/api", tags=["Equipments"])
 app.include_router(export.router, prefix="/api", tags=["Export"])
 app.include_router(slot_templates.router, prefix="/api", tags=["Slot Templates"])
 app.include_router(inventory.router, prefix="/api", tags=["Inventory"])
+app.include_router(room_polygons.router, prefix="/api", tags=["Room Polygons"])
 
 @app.get("/")
 def read_root():

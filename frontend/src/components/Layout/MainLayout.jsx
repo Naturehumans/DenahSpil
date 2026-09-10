@@ -31,7 +31,12 @@ const MainLayout = ({
   onSelectCategory,
   slots = [],
   onDeleteSlot,
-  onSelectMobileSlotTemplate
+  onSelectMobileSlotTemplate,
+  isDrawingPolygon,
+  setIsDrawingPolygon,
+  currentPolygon,
+  setCurrentPolygon,
+  onPolygonComplete
 }) => {
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
@@ -81,6 +86,11 @@ const MainLayout = ({
               floors={floors}
               currentFloor={currentFloor}
               onSelectFloor={onSelectFloor}
+              isDrawingPolygon={isDrawingPolygon}
+              setIsDrawingPolygon={setIsDrawingPolygon}
+              currentPolygon={currentPolygon}
+              setCurrentPolygon={setCurrentPolygon}
+              onPolygonComplete={onPolygonComplete}
             />
           ) : (
             <LeftSidebar 

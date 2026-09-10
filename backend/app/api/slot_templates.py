@@ -1,6 +1,6 @@
 import uuid
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -105,6 +105,7 @@ async def update_slot_position(
     slot_id: uuid.UUID,
     position_x: float,
     position_y: float,
+    room_name: str = Query(None, description="Set to string to update room name, empty string to clear"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -115,6 +116,8 @@ async def update_slot_position(
         
     slot.position_x = position_x
     slot.position_y = position_y
+    if room_name is not None:
+        slot.room_name = room_name if room_name != "" else None
     
     await db.commit()
     await db.refresh(slot)
