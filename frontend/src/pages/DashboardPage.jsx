@@ -67,7 +67,6 @@ const DashboardPage = () => {
   const [polygonName, setPolygonName] = useState('');
   const [selectedRoomPolygonDetail, setSelectedRoomPolygonDetail] = useState(null);
   const [confirmDeleteEq, setConfirmDeleteEq] = useState(false);
-  const [confirmSlotDrop, setConfirmSlotDrop] = useState(null);
   const [confirmAssignItem, setConfirmAssignItem] = useState(null);
   const [highlightedSlotId, setHighlightedSlotId] = useState(null);
   const [warrantyConfirm, setWarrantyConfirm] = useState(null);
@@ -256,31 +255,30 @@ const DashboardPage = () => {
     // In edit mode, we use drag and drop now. Canvas clicks don't do anything by themselves.
   };
 
-  const handleSlotDrop = (categoryId, x, y) => {
+  const handleSlotDrop = async (categoryId, x, y) => {
     setActiveMobileSlotTemplate(null);
     const cat = categories.find(c => c.id === categoryId);
-    setConfirmSlotDrop({ category: cat, x, y, roomName: '' });
-  };
+    if (!cat || !currentFloor) return;
 
-  const confirmCreateSlot = async () => {
-    if (!currentFloor || !confirmSlotDrop) return;
+    const detectedRoom = getRoomNameFromCoordinates({x, y}, roomPolygons);
+    if (!detectedRoom) {
+      showToast('Ruangan belum terdefinisi', 'error');
+      return;
+    }
+
     try {
-      const detectedRoom = getRoomNameFromCoordinates({x: confirmSlotDrop.x, y: confirmSlotDrop.y}, roomPolygons);
-      const roomName = (confirmSlotDrop.roomName || '').trim() || detectedRoom || 'Ruang Utama';
       const newSlot = await createSlot(currentFloor.id, {
-        category_id: confirmSlotDrop.category.id,
-        position_x: confirmSlotDrop.x,
-        position_y: confirmSlotDrop.y,
-        room_name: roomName
+        category_id: categoryId,
+        position_x: x,
+        position_y: y,
+        room_name: detectedRoom
       });
-      newSlot.category = confirmSlotDrop.category; // optimistic
-      newSlot.room_name = roomName;
+      newSlot.category = cat; // optimistic
+      newSlot.room_name = detectedRoom;
       setSlots(prev => [...prev, newSlot]);
-      showToast(detectedRoom ? `Slot ${confirmSlotDrop.category.name} berhasil ditempatkan di area ${detectedRoom}` : `Slot ${confirmSlotDrop.category.name} berhasil ditempatkan`, 'success');
+      showToast(`Slot ${cat.name} berhasil ditempatkan di area ${detectedRoom}`, 'success');
     } catch (err) {
       showToast('Gagal membuat slot', 'error');
-    } finally {
-      setConfirmSlotDrop(null);
     }
   };
 
@@ -685,8 +683,11 @@ const DashboardPage = () => {
     }
   };
 
-  const handleSlotMove = async (id, x, y, isFilled = false) => {
-    const sourceSlot = slots.find(s => s.id === id);
+  const handleSlotMove = async (id, x, y, isFilled = false, crossFloorSource = null) => {
+    let sourceSlot = slots.find(s => s.id === id);
+    if (!sourceSlot && crossFloorSource) {
+      sourceSlot = crossFloorSource;
+    }
     if (!sourceSlot) return;
 
     if (isFilled && (sourceSlot.equipment_id || sourceSlot.equipment)) {
@@ -749,11 +750,16 @@ const DashboardPage = () => {
           console.error("Error moving item between slots:", err);
           showToast(err.response?.data?.detail || 'Gagal memindahkan produk ke slot tujuan', 'error');
           // Revert optimistic update
-          setSlots([...slots]);
+          const cats = await getCategories();
+          setCategories(cats);
+          if (currentFloor) {
+            getSlotsByFloor(currentFloor.id).then(setSlots);
+          }
         }
       } else {
-        // If filled slot didn't hit a valid target slot, snap back
-        setSlots([...slots]);
+        // Target slot not found. Prevent moving the slot.
+        showToast('Unit harus ditempatkan di atas slot template yang sesuai.', 'error');
+        return;
       }
     } else {
       // Optimistic update for moving empty slot position on floorplan
@@ -872,6 +878,45 @@ const DashboardPage = () => {
       showToast('Gagal memperbarui area', 'error');
     }
   };
+
+  // Cross-floor drag-and-drop timer
+  useEffect(() => {
+    let hoverTimer = null;
+    let currentHoverFloorId = null;
+
+    const handleHoverStart = (e) => {
+      const targetFloorId = e.detail;
+      if (!targetFloorId || targetFloorId === currentHoverFloorId) return;
+      if (currentFloor && String(currentFloor.id) === String(targetFloorId)) return;
+
+      currentHoverFloorId = targetFloorId;
+      if (hoverTimer) clearTimeout(hoverTimer);
+
+      hoverTimer = setTimeout(() => {
+        const targetFloor = floors.find(f => String(f.id) === String(targetFloorId));
+        if (targetFloor) {
+          handleSelectFloor(targetFloor);
+        }
+      }, 800);
+    };
+
+    const handleHoverEnd = () => {
+      currentHoverFloorId = null;
+      if (hoverTimer) {
+        clearTimeout(hoverTimer);
+        hoverTimer = null;
+      }
+    };
+
+    window.addEventListener('konvaDragHoverFloor', handleHoverStart);
+    window.addEventListener('konvaDragHoverFloorEnd', handleHoverEnd);
+
+    return () => {
+      window.removeEventListener('konvaDragHoverFloor', handleHoverStart);
+      window.removeEventListener('konvaDragHoverFloorEnd', handleHoverEnd);
+      if (hoverTimer) clearTimeout(hoverTimer);
+    };
+  }, [floors, currentFloor]);
 
   const handleDeleteBuilding = async (id) => {
     try {
@@ -1354,91 +1399,7 @@ const DashboardPage = () => {
         }}
       />
 
-      <Modal 
-        isOpen={!!confirmSlotDrop} 
-        onClose={() => setConfirmSlotDrop(null)} 
-        title="Penempatan Slot Template"
-        maxWidth="460px"
-      >
-        {confirmSlotDrop && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '4px 0' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ 
-                width: '40px', height: '40px', borderRadius: '50%', 
-                background: confirmSlotDrop.category?.color || 'var(--color-primary)', 
-                color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontWeight: 'bold', fontSize: '1.1rem'
-              }}>
-                {(confirmSlotDrop.category?.name || 'S').charAt(0).toUpperCase()}
-              </div>
-              <div>
-                <h4 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--color-text-primary)' }}>
-                  Slot Kategori: {confirmSlotDrop.category?.name}
-                </h4>
-                <p style={{ margin: '2px 0 0', fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
-                  Gedung: {currentBuilding?.name || '-'} | {currentFloor?.name || '-'}
-                </p>
-              </div>
-            </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text-primary)' }}>
-                Lokasi Ruangan / Room Name *
-              </label>
-              <input 
-                type="text"
-                placeholder="Contoh: Ruang Meeting A, Kamar Utama, Lobby, Gudang..."
-                value={confirmSlotDrop.roomName || ''}
-                onChange={(e) => setConfirmSlotDrop({ ...confirmSlotDrop, roomName: e.target.value })}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    confirmCreateSlot();
-                  }
-                }}
-                style={{ 
-                  width: '100%', 
-                  padding: '10px 14px', 
-                  borderRadius: '10px', 
-                  border: '1px solid var(--color-border)', 
-                  outline: 'none',
-                  fontSize: '0.875rem',
-                  color: 'var(--color-text-primary)',
-                  background: 'var(--color-bg)'
-                }}
-                autoFocus
-              />
-              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                Nama ruangan ini akan tercantum di Detail Barang & Log History.
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px' }}>
-              <button 
-                onClick={() => setConfirmSlotDrop(null)}
-                style={{ 
-                  padding: '8px 16px', borderRadius: '8px', border: 'none', 
-                  background: 'transparent', color: 'var(--color-text-secondary)', 
-                  cursor: 'pointer', fontWeight: '500', fontSize: '0.875rem' 
-                }}
-              >
-                Batal
-              </button>
-              <button 
-                onClick={confirmCreateSlot}
-                style={{ 
-                  padding: '8px 20px', borderRadius: '8px', border: 'none', 
-                  background: 'var(--color-primary)', color: 'white', 
-                  cursor: 'pointer', fontWeight: '600', fontSize: '0.875rem',
-                  boxShadow: '0 4px 12px rgba(58, 149, 66, 0.3)'
-                }}
-              >
-                Tempatkan Slot
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
 
       <Modal 
         isOpen={!!confirmAssignItem} 

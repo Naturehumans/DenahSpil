@@ -10,12 +10,6 @@ const EditLeftSidebar = ({
 }) => {
   const [expandedBuildingId, setExpandedBuildingId] = React.useState(null);
 
-  React.useEffect(() => {
-    if (currentBuilding) {
-      setExpandedBuildingId(currentBuilding.id);
-    }
-  }, [currentBuilding]);
-
   const handleDragStart = (e, category) => {
     e.dataTransfer.setData('application/json', JSON.stringify({
       type: 'stock-item',
@@ -68,6 +62,12 @@ const EditLeftSidebar = ({
               <div key={bldg.id} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {/* Area Header (Accordion Button) */}
                 <button 
+                  onMouseEnter={() => {
+                    setExpandedBuildingId(bldg.id);
+                    if (currentBuilding?.id !== bldg.id) {
+                      onSelectBuilding(bldg.id);
+                    }
+                  }}
                   onClick={() => {
                     if (isExpanded) {
                       setExpandedBuildingId(null);
@@ -110,6 +110,7 @@ const EditLeftSidebar = ({
                       return (
                         <button 
                           key={floor.id}
+                          data-floor-id={floor.id}
                           onClick={() => onSelectFloor(floor)}
                           className={isActive ? "neu-inset" : "neu-raised-sm"} 
                           style={{ 

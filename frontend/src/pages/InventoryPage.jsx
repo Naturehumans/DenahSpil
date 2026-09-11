@@ -223,7 +223,15 @@ const InventoryPage = () => {
         }
       });
 
-      setBrandInventory(Object.values(map));
+      const sortedBrandInventory = Object.values(map).sort((a, b) => {
+        const catCmp = (a.category_name || '').localeCompare(b.category_name || '');
+        if (catCmp !== 0) return catCmp;
+        const brandCmp = (a.brand || '').localeCompare(b.brand || '');
+        if (brandCmp !== 0) return brandCmp;
+        return (a.model_number || '').localeCompare(b.model_number || '');
+      });
+      
+      setBrandInventory(sortedBrandInventory);
 
       // Load Damaged Inventory from Backend
       let localDamaged = [];

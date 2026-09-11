@@ -5,6 +5,7 @@ const EquipmentNode = ({
   equipment,
   isSelected,
   onSelect,
+  onDragStart,
   onDragEnd,
   isDraggable = true,
   scale = 1
@@ -43,9 +44,22 @@ const EquipmentNode = ({
       onDragStart={(e) => {
         e.cancelBubble = true;
         isDraggingRef.current = true;
+        if (onDragStart) onDragStart(equipment);
+      }}
+      onDragMove={(e) => {
+        if (e.evt) {
+          const elem = document.elementFromPoint(e.evt.clientX, e.evt.clientY);
+          const hoverFloorId = elem ? elem.getAttribute('data-floor-id') : null;
+          if (hoverFloorId) {
+            window.dispatchEvent(new CustomEvent('konvaDragHoverFloor', { detail: hoverFloorId }));
+          } else {
+            window.dispatchEvent(new CustomEvent('konvaDragHoverFloorEnd'));
+          }
+        }
       }}
       onDragEnd={(e) => {
         e.cancelBubble = true;
+        window.dispatchEvent(new CustomEvent('konvaDragHoverFloorEnd'));
         onDragEnd(equipment.id, e.target.x(), e.target.y());
         setTimeout(() => { isDraggingRef.current = false; }, 150);
       }}

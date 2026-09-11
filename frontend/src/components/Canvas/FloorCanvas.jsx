@@ -43,6 +43,28 @@ const FloorCanvas = ({
   });
   const [selectedId, setSelectedId] = useState(selectedEquipmentId);
   const [showGrid, setShowGrid] = useState(false);
+  const crossFloorDraggedItemRef = useRef(null);
+
+  // Preserve dragged items across floor changes
+  const combinedSlots = React.useMemo(() => {
+    const all = [...slots];
+    if (crossFloorDraggedItemRef.current && crossFloorDraggedItemRef.current.type === 'slot') {
+      if (!all.find(s => s.id === crossFloorDraggedItemRef.current.item.id)) {
+        all.push(crossFloorDraggedItemRef.current.item);
+      }
+    }
+    return all;
+  }, [slots]);
+
+  const combinedEquipments = React.useMemo(() => {
+    const all = [...equipments];
+    if (crossFloorDraggedItemRef.current && crossFloorDraggedItemRef.current.type === 'equipment') {
+      if (!all.find(e => e.id === crossFloorDraggedItemRef.current.item.id)) {
+        all.push(crossFloorDraggedItemRef.current.item);
+      }
+    }
+    return all;
+  }, [equipments]);
   const [gridSizeMultiplier, setGridSizeMultiplier] = useState(1);
   const [gridOffset, setGridOffset] = useState({ x: 0, y: 0 });
   const [isTwoFingerTouch, setIsTwoFingerTouch] = useState(false);
@@ -818,7 +840,7 @@ const FloorCanvas = ({
           )}
 
           {/* Slots */}
-          {slots.map((slot) => (
+          {combinedSlots.map((slot) => (
             <SlotNode
               key={slot.id}
               slot={slot}
@@ -829,14 +851,19 @@ const FloorCanvas = ({
                 setSelectedId(id);
                 if (onSlotSelect) onSlotSelect(slot, eq);
               }}
+              onDragStart={(slot) => {
+                crossFloorDraggedItemRef.current = { type: 'slot', item: slot };
+              }}
               onDragEnd={(id, x, y, isFilled = false) => {
+                const draggedItem = crossFloorDraggedItemRef.current;
+                crossFloorDraggedItemRef.current = null;
                 if (onSlotMove && isEditMode) {
                   if (showGrid && !isFilled) {
                     const snapX = Math.round((x - gridOffset.x) / currentGridSize) * currentGridSize + gridOffset.x;
                     const snapY = Math.round((y - gridOffset.y) / currentGridSize) * currentGridSize + gridOffset.y;
-                    onSlotMove(id, snapX, snapY, isFilled);
+                    onSlotMove(id, snapX, snapY, isFilled, draggedItem?.item);
                   } else {
-                    onSlotMove(id, x, y, isFilled);
+                    onSlotMove(id, x, y, isFilled, draggedItem?.item);
                   }
                 }
               }}
@@ -846,7 +873,7 @@ const FloorCanvas = ({
           ))}
 
           {/* Equipments (legacy/non-slot ones) */}
-          {equipments.filter(eq => !slots.some(s => s.equipment_id === eq.id)).map((eq) => (
+          {combinedEquipments.filter(eq => !combinedSlots.some(s => s.equipment_id === eq.id)).map((eq) => (
             <EquipmentNode
               key={eq.id}
               equipment={eq}
@@ -855,7 +882,11 @@ const FloorCanvas = ({
                 setSelectedId(eq.id);
                 if (onEquipmentClick) onEquipmentClick(eq);
               }}
+              onDragStart={(eq) => {
+                crossFloorDraggedItemRef.current = { type: 'equipment', item: eq };
+              }}
               onDragEnd={(id, x, y) => {
+                crossFloorDraggedItemRef.current = null;
                 if (onEquipmentMove && isEditMode) {
                   // Snap to grid if grid is active
                   if (showGrid) {
