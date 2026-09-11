@@ -233,9 +233,10 @@ async def assign_equipment_to_slot(
     slot.equipment_id = new_equipment.id
     
     # Log history
-    room_txt = f" - Ruang: {slot.room_name}" if slot.room_name else ""
+    # Log history
     b_name = slot.floor.building.name if (slot.floor and slot.floor.building) else "Gedung Utama"
     f_name = slot.floor.name if slot.floor else "Lantai 1"
+    room_txt = f", Ruang {slot.room_name}" if slot.room_name else ""
 
     log = InventoryHistoryLog(
         category_id=cat.id,
@@ -248,7 +249,7 @@ async def assign_equipment_to_slot(
         brand=brand,
         model_number=model_number,
         status="Dipasang",
-        location_info=f"Penempatan di {b_name} - {f_name}{room_txt}",
+        location_info=f'"{auto_name}" Ditempatkan di {b_name}, {f_name}{room_txt}',
         performed_by=current_user.id
     )
     db.add(log)
@@ -329,14 +330,20 @@ async def move_equipment_between_slots(
     target_slot.equipment_id = eq.id
 
     # Step 3: Record History Log for drag & drop move
+    # Step 3: Record History Log for drag & drop move
     bldg_name = target_slot.floor.building.name if (target_slot.floor and target_slot.floor.building) else "Gedung Utama"
     flr_name = target_slot.floor.name if target_slot.floor else "-"
-    source_rm = f"Ruang {source_slot.room_name}" if source_slot.room_name else (source_slot.slot_code or "Slot Lama")
-    target_rm = f"Ruang {target_slot.room_name}" if target_slot.room_name else (target_slot.slot_code or "Slot Baru")
+    source_bldg = source_slot.floor.building.name if (source_slot.floor and source_slot.floor.building) else "Gedung Utama"
+    source_flr = source_slot.floor.name if source_slot.floor else "-"
+    
+    source_rm = f", Ruang {source_slot.room_name}" if source_slot.room_name else ""
+    target_rm = f", Ruang {target_slot.room_name}" if target_slot.room_name else ""
+
+    item_code = eq.name if eq and eq.name else (eq.model_number if eq and eq.model_number else (target_slot.category.name if target_slot.category else "Aset"))
 
     move_log = InventoryHistoryLog(
         category_id=target_slot.category_id,
-        asset_id=eq.name or (target_slot.category.name if target_slot.category else "Aset"),
+        asset_id=item_code,
         slot_code=target_slot.slot_code or source_slot.slot_code,
         action_type="move",
         building_name=bldg_name,
@@ -345,7 +352,7 @@ async def move_equipment_between_slots(
         brand=eq.brand,
         model_number=eq.model_number,
         status="Dipasang (Dipindahkan)",
-        location_info=f"Dipindahkan dari {source_rm} ke {target_rm} ({bldg_name} - {flr_name})",
+        location_info=f'"{item_code}" Dipindahkan dari {source_bldg}, {source_flr}{source_rm} ke {bldg_name}, {flr_name}{target_rm}',
         performed_by=current_user.id
     )
     db.add(move_log)
@@ -432,10 +439,12 @@ async def unassign_equipment_from_slot(
 
     # Save to InventoryHistoryLog for /history view ONLY if category exists
     if cat:
-        rm_suffix = f" - Ruang: {rm_name}" if rm_name else ""
+        rm_suffix = f", Ruang {rm_name}" if rm_name else ""
+        item_code = eq.name if eq and eq.name else (eq.model_number if eq and eq.model_number else cat.name)
+        
         log = InventoryHistoryLog(
             category_id=cat.id,
-            asset_id=eq.name if eq else cat.name,
+            asset_id=item_code,
             slot_code=slot.slot_code,
             action_type=action_type,
             building_name=bldg_name,
@@ -444,7 +453,7 @@ async def unassign_equipment_from_slot(
             brand=eq.brand if eq else None,
             model_number=eq.model_number if eq else None,
             status=status_text,
-            location_info=f"Dilepas dari {bldg_name} - {flr_name}{rm_suffix}",
+            location_info=f'"{item_code}" Dilepas dari {bldg_name}, {flr_name}{rm_suffix}',
             performed_by=current_user.id
         )
         if action_date:

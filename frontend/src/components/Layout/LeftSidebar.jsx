@@ -12,12 +12,7 @@ const LeftSidebar = ({
   const [search, setSearch] = useState('');
   const [expandedBuildingId, setExpandedBuildingId] = React.useState(null);
 
-  // Ensure current building is always expanded by default when selected
-  React.useEffect(() => {
-    if (currentBuilding) {
-      setExpandedBuildingId(currentBuilding.id);
-    }
-  }, [currentBuilding]);
+  // Removed automatic expansion on currentBuilding change so buildings remain collapsed by default
 
   const categoryCounts = {};
   equipments.forEach(eq => {
@@ -68,6 +63,12 @@ const LeftSidebar = ({
                 <div key={bldg.id} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {/* Area Header (Accordion Button) */}
                   <button 
+                    onMouseEnter={() => {
+                      setExpandedBuildingId(bldg.id);
+                      if (currentBuilding?.id !== bldg.id) {
+                        onSelectBuilding(bldg.id);
+                      }
+                    }}
                     onClick={() => {
                       if (isExpanded) {
                         setExpandedBuildingId(null);
@@ -110,6 +111,7 @@ const LeftSidebar = ({
                         return (
                           <button 
                             key={floor.id}
+                            data-floor-id={floor.id}
                             onClick={() => onSelectFloor(floor)}
                             className={isActive ? "neu-inset" : "neu-raised-sm"} 
                             style={{ 

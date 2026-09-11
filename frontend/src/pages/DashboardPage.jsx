@@ -73,6 +73,7 @@ const DashboardPage = () => {
   const [warrantyConfirm, setWarrantyConfirm] = useState(null);
 
   const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
+  const [showFilters, setShowFilters] = useState(false);
   const [categoryBlockedNotice, setCategoryBlockedNotice] = useState(null);
   const [activeMobileSlotTemplate, setActiveMobileSlotTemplate] = useState(null);
   const [pendingReplacement, setPendingReplacement] = useState(null);
@@ -139,7 +140,12 @@ const DashboardPage = () => {
       // Wait for the slot to become empty before triggering the drop
       if (slot && !slot.equipment_id && !slot.equipment && pendingActionRef.current) {
         pendingActionRef.current = false;
-        handleItemDropOnSlot(pendingReplacement.categoryId, pendingReplacement.slotId);
+        handleItemDropOnSlot(
+          pendingReplacement.categoryId, 
+          pendingReplacement.slotId, 
+          pendingReplacement.selectedBrand, 
+          pendingReplacement.selectedModel
+        );
         setPendingReplacement(null);
       }
     }
@@ -313,7 +319,7 @@ const DashboardPage = () => {
     setIsDrawingPolygon(false);
   };
 
-  const handleItemDropOnSlot = async (categoryId, slotId) => {
+  const handleItemDropOnSlot = async (categoryId, slotId, preselectedBrand = null, preselectedModel = null) => {
     if (!slotId) {
       showToast('Letakkan barang di atas slot yang sudah ada', 'warning');
       return;
@@ -322,14 +328,6 @@ const DashboardPage = () => {
     if (!slot) return;
     if (slot.category_id !== categoryId) {
       showToast('Kategori barang tidak cocok dengan slot ini', 'error');
-      return;
-    }
-
-    if (slot.equipment_id || slot.equipment) {
-      setSelectedSlot(slot);
-      pendingActionRef.current = true;
-      setPendingReplacement({ categoryId, slotId });
-      setActiveModal('unassign_destination');
       return;
     }
 
@@ -381,6 +379,37 @@ const DashboardPage = () => {
     const firstBrand = firstAvailableBrand?.brand || categoryBrands[0]?.brand || '';
     const firstModel = firstAvailableBrand?.model_number || categoryBrands[0]?.model_number || '';
     const isCustomDefault = !firstAvailableBrand && categoryBrands.length > 0;
+
+    if (slot.equipment_id || slot.equipment) {
+      setSelectedSlot(slot);
+      pendingActionRef.current = true;
+      setPendingReplacement({ 
+        categoryId, 
+        slotId, 
+        category: cat,
+        categoryBrands, 
+        selectedBrand: firstBrand, 
+        selectedModel: firstModel 
+      });
+      setActiveModal('unassign_destination');
+      return;
+    }
+
+    if (preselectedBrand) {
+      try {
+        const updatedSlot = await assignItemToSlot(slotId, preselectedBrand, preselectedModel);
+        setSlots(prev => prev.map(s => s.id === slotId ? updatedSlot : s));
+        if (cat) {
+          updateBrandStockOnAssign(cat, preselectedBrand, preselectedModel);
+        }
+        const cats = await getCategories();
+        setCategories(cats);
+        showToast(`Barang ${preselectedBrand} berhasil dipasang!`, 'success');
+      } catch (err) {
+        showToast(err.response?.data?.detail || 'Gagal menempatkan barang', 'error');
+      }
+      return;
+    }
 
     setConfirmAssignItem({
       slotId,
@@ -776,7 +805,11 @@ const DashboardPage = () => {
       showToast('Buat lantai terlebih dahulu', 'warning');
       return;
     }
-    setIsEditMode(!isEditMode);
+    const newEditMode = !isEditMode;
+    setIsEditMode(newEditMode);
+    if (newEditMode) {
+      setSelectedCategoryIds([]);
+    }
   };
 
   const handleManageHistory = () => {
@@ -1185,48 +1218,107 @@ const DashboardPage = () => {
         </div>
       )}
 
-      {selectedCategoryObj && (
-        <div style={{
-          position: 'absolute',
-          top: '24px',
-          left: '24px',
-          background: '#ffffff',
-          border: `2px solid ${selectedCategoryObj.color || 'var(--color-primary)'}`,
-          padding: '8px 16px',
-          borderRadius: '20px',
-          fontWeight: '700',
-          fontSize: '0.875rem',
-          color: '#0f172a',
-          boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
-          zIndex: 15,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}>
-          <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: selectedCategoryObj.color || 'var(--color-primary)' }} />
-          <span>Kategori: {selectedCategoryObj.name} ({canvasSlots.length} item)</span>
-          <button 
-            onClick={() => setSelectedCategoryId(null)}
-            style={{
-              background: 'rgba(0,0,0,0.06)',
-              border: 'none',
-              borderRadius: '50%',
-              width: '20px',
-              height: '20px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 'bold',
-              fontSize: '0.75rem',
-              color: '#64748b'
-            }}
-            title="Tampilkan Semua Kategori"
-          >
-            ✕
-          </button>
-        </div>
-      )}
+      {/* Visibility Controls Toggle Button & Panel */}
+      <div style={{
+        position: 'absolute',
+        top: '24px',
+        left: '24px',
+        zIndex: 20
+      }}>
+        <button 
+          onClick={() => setShowFilters(!showFilters)}
+          className={showFilters ? "neu-inset" : "neu-raised-sm"}
+          style={{ 
+            padding: '10px 16px', fontSize: '0.875rem', fontWeight: 'bold', 
+            color: 'var(--color-text-primary)', borderRadius: '24px', border: 'none', 
+            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+          }}
+          title="Filter Kategori Barang"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          Filter Barang
+          <span style={{ 
+            background: selectedCategoryIds.length === 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)', 
+            color: 'white', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' 
+          }}>
+            {selectedCategoryIds.length === 1 && selectedCategoryIds[0] === 'none' ? '0' : (selectedCategoryIds.length === 0 ? 'Semua' : selectedCategoryIds.length)}
+          </span>
+        </button>
+
+        {showFilters && (
+          <div className="neu-raised" style={{
+            position: 'absolute',
+            top: '52px',
+            left: '0',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            padding: '16px',
+            borderRadius: '16px',
+            background: 'var(--color-bg)',
+            width: 'max-content',
+            maxWidth: '320px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.15)'
+          }}>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button 
+                onClick={() => setSelectedCategoryIds([])}
+                className={selectedCategoryIds.length === 0 ? "neu-inset" : "neu-raised-sm"}
+                style={{ flex: 1, padding: '8px 16px', fontSize: '0.85rem', fontWeight: '600', color: selectedCategoryIds.length === 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)', borderRadius: '24px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                Select All
+              </button>
+              <button 
+                onClick={() => setSelectedCategoryIds(['none'])}
+                className={selectedCategoryIds.length === 1 && selectedCategoryIds[0] === 'none' ? "neu-inset" : "neu-raised-sm"}
+                style={{ flex: 1, padding: '8px 16px', fontSize: '0.85rem', fontWeight: '600', color: selectedCategoryIds.length === 1 && selectedCategoryIds[0] === 'none' ? 'var(--color-danger)' : 'var(--color-text-secondary)', borderRadius: '24px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
+                Remove All
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {categories.map(cat => {
+                const isActive = selectedCategoryIds.length === 0 || (!selectedCategoryIds.includes('none') && selectedCategoryIds.includes(cat.id));
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => {
+                      if (selectedCategoryIds.length === 0) {
+                        setSelectedCategoryIds(categories.map(c => c.id).filter(id => id !== cat.id));
+                      } else if (selectedCategoryIds.length === 1 && selectedCategoryIds[0] === 'none') {
+                        setSelectedCategoryIds([cat.id]);
+                      } else {
+                        setSelectedCategoryIds(prev => {
+                          if (prev.includes(cat.id)) {
+                            const next = prev.filter(id => id !== cat.id);
+                            return next.length === 0 ? ['none'] : next;
+                          } else {
+                            const next = [...prev, cat.id];
+                            return next.length === categories.length ? [] : next;
+                          }
+                        });
+                      }
+                    }}
+                    className={isActive ? "neu-inset" : "neu-raised-sm"}
+                    style={{ 
+                      padding: '6px 12px', fontSize: '0.8rem', fontWeight: '600', 
+                      color: isActive ? 'var(--color-primary)' : 'var(--color-text-secondary)', 
+                      borderRadius: '16px', border: 'none', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: '6px'
+                    }}
+                  >
+                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: cat.color || 'var(--color-primary)', opacity: isActive ? 1 : 0.4 }} />
+                    {cat.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
 
       <FloorCanvas 
         imageUrl={currentImageUrl}
@@ -1383,86 +1475,52 @@ const DashboardPage = () => {
                 Pilih Merk / Tipe Terdaftar:
               </label>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto' }}>
-                {confirmAssignItem.categoryBrands.map((bItem, idx) => {
-                  const isSelected = !confirmAssignItem.isCustom && 
-                    confirmAssignItem.selectedBrand === bItem.brand && 
-                    confirmAssignItem.selectedModel === bItem.model_number;
-
-                  const isOutOfStock = bItem.stock === 0;
-
-                  return (
-                    <div 
-                      key={idx}
-                      onClick={() => {
-                        if (!isOutOfStock) {
-                          setConfirmAssignItem({
-                            ...confirmAssignItem,
-                            isCustom: false,
-                            selectedBrand: bItem.brand,
-                            selectedModel: bItem.model_number || ''
-                          });
-                        }
-                      }}
-                      style={{ 
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        padding: '10px 14px', borderRadius: '10px',
-                        border: isSelected ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
-                        background: isSelected ? 'rgba(58, 149, 66, 0.08)' : (isOutOfStock ? '#f3f4f6' : 'var(--color-bg)'),
-                        cursor: isOutOfStock ? 'not-allowed' : 'pointer', 
-                        transition: 'all 0.2s ease',
-                        opacity: isOutOfStock ? 0.6 : 1
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <input 
-                          type="radio" 
-                          checked={isSelected}
-                          disabled={isOutOfStock}
-                          onChange={() => {}}
-                          style={{ accentColor: 'var(--color-primary)', cursor: isOutOfStock ? 'not-allowed' : 'pointer' }}
-                        />
-                        <div>
-                          <strong style={{ fontSize: '0.9rem', color: 'var(--color-text-primary)' }}>
-                            {bItem.brand}
-                          </strong>
-                          {bItem.model_number && (
-                            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginLeft: '8px' }}>
-                              ({bItem.model_number})
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      {bItem.stock !== undefined && (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', background: 'var(--color-bg-secondary)', padding: '2px 8px', borderRadius: '12px' }}>
-                          Stok: {bItem.stock}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-
-                {/* Option Custom */}
-                <div 
-                  onClick={() => setConfirmAssignItem({ ...confirmAssignItem, isCustom: true })}
-                  style={{ 
-                    display: 'flex', alignItems: 'center', gap: '10px',
-                    padding: '10px 14px', borderRadius: '10px',
-                    border: confirmAssignItem.isCustom ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
-                    background: confirmAssignItem.isCustom ? 'rgba(58, 149, 66, 0.08)' : 'var(--color-bg)',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <input 
-                    type="radio" 
-                    checked={confirmAssignItem.isCustom}
-                    onChange={() => {}}
-                    style={{ accentColor: 'var(--color-primary)' }}
-                  />
-                  <span style={{ fontSize: '0.9rem', fontWeight: '500', color: 'var(--color-text-primary)' }}>
-                    + Input Merk & Tipe Manual / Lainnya
-                  </span>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
+                    Merk
+                  </label>
+                  <select 
+                    value={confirmAssignItem.isCustom ? 'custom' : confirmAssignItem.selectedBrand}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === 'custom') {
+                        setConfirmAssignItem({ ...confirmAssignItem, isCustom: true });
+                      } else {
+                        const models = confirmAssignItem.categoryBrands.filter(b => b.brand === val);
+                        const firstModel = models.length > 0 ? models[0].model_number : '';
+                        setConfirmAssignItem({ ...confirmAssignItem, isCustom: false, selectedBrand: val, selectedModel: firstModel });
+                      }
+                    }}
+                    className="neu-inset"
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.875rem', outline: 'none' }}
+                  >
+                    {Array.from(new Set(confirmAssignItem.categoryBrands.map(b => b.brand))).map((brand, idx) => (
+                      <option key={idx} value={brand}>{brand}</option>
+                    ))}
+                    <option value="custom">+ Input Merk/Tipe Manual</option>
+                  </select>
                 </div>
+                
+                {!confirmAssignItem.isCustom && (
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
+                      Kode Barang (Tipe)
+                    </label>
+                    <select 
+                      value={confirmAssignItem.selectedModel}
+                      onChange={(e) => setConfirmAssignItem({ ...confirmAssignItem, selectedModel: e.target.value })}
+                      className="neu-inset"
+                      style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.875rem', outline: 'none' }}
+                    >
+                      {confirmAssignItem.categoryBrands.filter(b => b.brand === confirmAssignItem.selectedBrand).map((b, idx) => (
+                        <option key={idx} value={b.model_number} disabled={b.stock === 0}>
+                          {b.model_number || 'Standard'} {b.stock !== undefined ? `(Stok: ${b.stock})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1814,6 +1872,73 @@ const DashboardPage = () => {
           <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem', marginBottom: '12px' }}>
             Kemana Anda ingin memindahkan barang ini dari template denah? Status akan langsung terhubung ke <strong>History Log</strong>.
           </p>
+
+          {(pendingReplacement || pendingSlotMove) && (() => {
+            const outgoingItem = selectedSlot?.equipment || selectedEquipment;
+            const outgoingCode = outgoingItem ? (outgoingItem.name || outgoingItem.asset_id || outgoingItem.slot_code || outgoingItem.brand || 'Tanpa Kode') : '-';
+            
+            let incomingCode = '-';
+            if (pendingSlotMove) {
+              const incomingSlot = slots.find(s => s.id === pendingSlotMove.sourceSlotId);
+              const incomingItem = incomingSlot?.equipment;
+              incomingCode = incomingItem ? (incomingItem.name || incomingItem.asset_id || incomingItem.slot_code || incomingItem.brand || 'Tanpa Kode') : '-';
+            } else if (pendingReplacement) {
+              incomingCode = (
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <select 
+                    value={pendingReplacement.selectedBrand}
+                    onChange={(e) => {
+                      const newBrand = e.target.value;
+                      const models = pendingReplacement.categoryBrands.filter(b => b.brand === newBrand);
+                      const newModel = models.length > 0 ? models[0].model_number : '';
+                      setPendingReplacement(prev => ({...prev, selectedBrand: newBrand, selectedModel: newModel}));
+                    }}
+                    style={{ background: 'var(--color-bg, #fff)', border: '1px solid var(--color-border, #ccc)', borderRadius: '6px', padding: '4px 8px', fontSize: '0.85rem', color: 'var(--color-text, #333)', maxWidth: '100px', outline: 'none', cursor: 'pointer' }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {Array.from(new Set(pendingReplacement.categoryBrands?.map(b => b.brand))).map((brand, idx) => (
+                      <option key={idx} value={brand}>{brand}</option>
+                    ))}
+                  </select>
+                  <select 
+                    value={pendingReplacement.selectedModel}
+                    onChange={(e) => setPendingReplacement(prev => ({...prev, selectedModel: e.target.value}))}
+                    style={{ background: 'var(--color-bg, #fff)', border: '1px solid var(--color-border, #ccc)', borderRadius: '6px', padding: '4px 8px', fontSize: '0.85rem', color: 'var(--color-text, #333)', maxWidth: '100px', outline: 'none', cursor: 'pointer' }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {pendingReplacement.categoryBrands?.filter(b => b.brand === pendingReplacement.selectedBrand).map((b, idx) => (
+                      <option key={idx} value={b.model_number}>{b.model_number || 'Standard'}</option>
+                    ))}
+                  </select>
+                </div>
+              );
+            }
+
+            return (
+              <div style={{
+                background: 'var(--color-bg-secondary, rgba(0,0,0,0.02))',
+                border: '1px solid var(--color-border, rgba(0,0,0,0.08))',
+                borderRadius: '8px',
+                padding: '12px',
+                marginBottom: '16px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #64748b)', marginBottom: '4px' }}>Barang Keluar</div>
+                  <div style={{ fontWeight: '600', color: 'var(--color-danger, #ef4444)', fontSize: '0.9rem' }}>{outgoingCode}</div>
+                </div>
+                <div style={{ padding: '0 12px', color: 'var(--color-text-muted, #64748b)', display: 'flex', alignItems: 'center' }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                </div>
+                <div style={{ flex: 1, textAlign: 'right' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #64748b)', marginBottom: '4px' }}>Barang Masuk</div>
+                  <div style={{ fontWeight: '600', color: 'var(--color-success, #22c55e)', fontSize: '0.9rem' }}>{incomingCode}</div>
+                </div>
+              </div>
+            );
+          })()}
           
           <div style={{ marginBottom: '20px' }}>
             <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text)', marginBottom: '8px' }}>

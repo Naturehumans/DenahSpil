@@ -217,7 +217,8 @@ const HistoryPage = () => {
 
     if (selectedBuilding !== 'all' && bName !== selectedBuilding) return false;
     if (selectedFloor !== 'all' && fName !== selectedFloor) return false;
-    if (selectedCategoryId !== 'all' && log.category_id !== selectedCategoryId) return false;
+    const catId = String(log.category?.id || log.category_id || '');
+    if (selectedCategoryId !== 'all' && catId !== String(selectedCategoryId)) return false;
     if (selectedCondition !== 'all') {
       const cond = selectedCondition.toLowerCase();
       if (!statusText.toLowerCase().includes(cond)) return false;
@@ -696,7 +697,7 @@ const HistoryPage = () => {
             {/* Filter Kategori */}
             <select
               value={selectedCategoryId}
-              onChange={(e) => setSelectedCategoryId(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
+              onChange={(e) => setSelectedCategoryId(e.target.value)}
               className="neu-inset filter-select-mobile"
               style={{
                 padding: '8px 12px',
