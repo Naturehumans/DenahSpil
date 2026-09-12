@@ -61,15 +61,9 @@ const LeftSidebar = ({
               
               return (
                 <div key={bldg.id} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {/* Area Header (Accordion Button) */}
-                  <button 
-                    onMouseEnter={() => {
-                      setExpandedBuildingId(bldg.id);
-                      if (currentBuilding?.id !== bldg.id) {
-                        onSelectBuilding(bldg.id);
-                      }
-                    }}
-                    onClick={() => {
+                {/* Area Header (Accordion Button) */}
+                <button 
+                  onClick={() => {
                       if (isExpanded) {
                         setExpandedBuildingId(null);
                       } else {

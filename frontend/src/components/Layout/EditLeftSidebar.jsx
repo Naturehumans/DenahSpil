@@ -9,6 +9,7 @@ const EditLeftSidebar = ({
   currentPolygon, setCurrentPolygon, onPolygonComplete
 }) => {
   const [expandedBuildingId, setExpandedBuildingId] = React.useState(null);
+  const hoverTimerRef = React.useRef(null);
 
   const handleDragStart = (e, category) => {
     e.dataTransfer.setData('application/json', JSON.stringify({
@@ -63,9 +64,18 @@ const EditLeftSidebar = ({
                 {/* Area Header (Accordion Button) */}
                 <button 
                   onMouseEnter={() => {
-                    setExpandedBuildingId(bldg.id);
-                    if (currentBuilding?.id !== bldg.id) {
-                      onSelectBuilding(bldg.id);
+                    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+                    hoverTimerRef.current = setTimeout(() => {
+                      setExpandedBuildingId(bldg.id);
+                      if (currentBuilding?.id !== bldg.id) {
+                        onSelectBuilding(bldg.id);
+                      }
+                    }, 400); // 400ms delay to reduce sensitivity
+                  }}
+                  onMouseLeave={() => {
+                    if (hoverTimerRef.current) {
+                      clearTimeout(hoverTimerRef.current);
+                      hoverTimerRef.current = null;
                     }
                   }}
                   onClick={() => {
