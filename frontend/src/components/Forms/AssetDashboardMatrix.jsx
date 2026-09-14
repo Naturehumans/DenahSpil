@@ -4,7 +4,7 @@ import { getBuildings } from '../../api/buildings';
 import { getCategories } from '../../api/categories';
 import { getAllEquipments } from '../../api/equipments';
 import { getAllSlots } from '../../api/slots';
-import { getInventoryLogs } from '../../api/inventory';
+import { getInventoryLogs, getAssets } from '../../api/inventory';
 import { useToast } from '../../contexts/ToastContext';
 import { RefreshCw, Search, FileSpreadsheet } from 'lucide-react';
 import Skeleton from '../UI/Skeleton';
@@ -16,6 +16,7 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
   const [equipments, setEquipments] = useState([]);
   const [slots, setSlots] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [assets, setAssets] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedBuildings, setExpandedBuildings] = useState({});
   const { showToast } = useToast();
@@ -33,18 +34,20 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
   const loadMatrixData = async () => {
     setLoading(true);
     try {
-      const [bRes, cRes, eRes, sRes, lRes] = await Promise.all([
+      const [bRes, cRes, eRes, sRes, lRes, aRes] = await Promise.all([
         getBuildings().catch(() => []),
         getCategories().catch(() => []),
         getAllEquipments().catch(() => []),
         getAllSlots().catch(() => []),
-        getInventoryLogs().catch(() => [])
+        getInventoryLogs().catch(() => []),
+        getAssets('available').catch(() => [])
       ]);
       setBuildings(Array.isArray(bRes) ? bRes : []);
       setCategories(Array.isArray(cRes) ? cRes : []);
       setEquipments(Array.isArray(eRes) ? eRes : []);
       setSlots(Array.isArray(sRes) ? sRes : []);
       setLogs(Array.isArray(lRes) ? lRes : []);
+      setAssets(Array.isArray(aRes) ? aRes : []);
     } catch (err) {
       showToast('Gagal memuat data Dashboard Aset', 'error');
     } finally {
@@ -225,18 +228,12 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
   let lowestStockCategoryName = '-';
   let minStockCount = Infinity;
 
-  let brandMap = {};
-  try {
-    const saved = localStorage.getItem('spil_category_brands');
-    if (saved) brandMap = JSON.parse(saved);
-  } catch (e) {}
-
   displayCategories.forEach(cat => {
     let catStock = cat.initial_stock || 0;
-    const catBrands = brandMap[cat.name?.toLowerCase()] || brandMap[cat.id] || [];
-    if (catBrands.length > 0) {
-      catStock = catBrands.reduce((sum, b) => sum + (parseInt(b.stock) || 0), 0);
-    }
+    
+    // Add available assets for this category
+    const catAssets = assets.filter(a => String(a.category_id) === String(cat.id));
+    catStock += catAssets.length;
 
     if (catStock < minStockCount) {
       minStockCount = catStock;

@@ -37,6 +37,7 @@ import {
   unassignItemFromSlot 
 } from '../api/slots';
 import { getRoomPolygonsByFloor, createRoomPolygon, deleteRoomPolygon } from '../api/roomPolygons';
+import { getAssets } from '../api/inventory';
 import api from '../api/axios';
 import { getRoomNameFromCoordinates, isPointInPolygon } from '../utils/geometry';
 
@@ -331,52 +332,34 @@ const DashboardPage = () => {
 
     const cat = categories.find(c => c.id === categoryId);
     
-    // Fetch registered brands from localStorage or default mocks
-    let categoryBrands = [];
+    // Fetch available assets from inventory
+    let availableAssets = [];
     try {
-      const saved = localStorage.getItem('spil_category_brands');
-      if (saved) {
-        const map = JSON.parse(saved);
-        const key = (cat?.name || '').toLowerCase();
-        categoryBrands = map[key] || map[cat?.id] || [];
-      }
-    } catch (e) {}
-
-    // Fallback brand presets if none configured yet
-    if (!categoryBrands || categoryBrands.length === 0) {
-      const catNameLower = (cat?.name || '').toLowerCase();
-      if (catNameLower.includes('ac')) {
-        categoryBrands = [
-          { id: 'b1', brand: 'LG', model_number: 'Inverter 1PK' },
-          { id: 'b2', brand: 'Panasonic', model_number: 'Standard 2PK' },
-          { id: 'b3', brand: 'Daikin', model_number: 'Inverter 1.5PK' }
-        ];
-      } else if (catNameLower.includes('lampu')) {
-        categoryBrands = [
-          { id: 'b4', brand: 'Philips', model_number: 'LED 14W' },
-          { id: 'b5', brand: 'Hoppecke', model_number: 'Warm White 9W' }
-        ];
-      } else if (catNameLower.includes('kipas')) {
-        categoryBrands = [
-          { id: 'b6', brand: 'Miyako', model_number: 'Stand Fan 16"' },
-          { id: 'b7', brand: 'Sekai', model_number: 'Wall Fan 18"' }
-        ];
-      } else if (catNameLower.includes('proyektor')) {
-        categoryBrands = [
-          { id: 'b8', brand: 'Epson', model_number: 'EB-X500' },
-          { id: 'b9', brand: 'BenQ', model_number: 'MS550' }
-        ];
-      } else {
-        categoryBrands = [
-          { id: 'b10', brand: 'Standard', model_number: 'Model Regular' }
-        ];
-      }
+      availableAssets = await getAssets('available');
+    } catch (e) {
+      console.error("Failed to fetch available assets", e);
     }
+    
+    // Filter and group by brand & model for the specific category
+    const categoryAssets = availableAssets.filter(a => String(a.category_id) === String(categoryId));
+    const brandMap = {};
+    
+    categoryAssets.forEach(asset => {
+      const b = asset.brand || 'Lainnya';
+      const m = asset.model_number || 'Standard';
+      const key = `${b}|${m}`;
+      if (!brandMap[key]) {
+        brandMap[key] = { brand: b, model_number: m, stock: 0 };
+      }
+      brandMap[key].stock += 1;
+    });
+    
+    let categoryBrands = Object.values(brandMap);
 
-    const firstAvailableBrand = categoryBrands.find(b => b.stock === undefined || b.stock > 0);
-    const firstBrand = firstAvailableBrand?.brand || categoryBrands[0]?.brand || '';
-    const firstModel = firstAvailableBrand?.model_number || categoryBrands[0]?.model_number || '';
-    const isCustomDefault = !firstAvailableBrand && categoryBrands.length > 0;
+    const firstAvailableBrand = categoryBrands.length > 0 ? categoryBrands[0] : null;
+    const firstBrand = firstAvailableBrand?.brand || '';
+    const firstModel = firstAvailableBrand?.model_number || '';
+    const isCustomDefault = !firstAvailableBrand;
 
     if (slot.equipment_id || slot.equipment) {
       setSelectedSlot(slot);
@@ -424,36 +407,8 @@ const DashboardPage = () => {
   };
 
   const updateBrandStockOnAssign = (category, brandName, modelNumber) => {
-    try {
-      const saved = localStorage.getItem('spil_category_brands');
-      const map = saved ? JSON.parse(saved) : {};
-      const catKey = (category?.name || '').toLowerCase();
-      const brands = map[catKey] || map[category?.id] || [];
-
-      let found = false;
-      const updatedBrands = brands.map(b => {
-        if ((b.brand || '').toLowerCase() === (brandName || '').toLowerCase() && (b.model_number || '').toLowerCase() === (modelNumber || '').toLowerCase()) {
-          found = true;
-          const currentStock = parseInt(b.stock) || 0;
-          return { ...b, stock: Math.max(0, currentStock - 1) };
-        }
-        return b;
-      });
-
-      if (!found && brandName) {
-        updatedBrands.push({
-          id: 'b_' + Date.now(),
-          brand: brandName,
-          model_number: modelNumber || '',
-          stock: 0,
-          min_stock: 1
-        });
-      }
-
-      map[catKey] = updatedBrands;
-      if (category?.id) map[category.id] = updatedBrands;
-      localStorage.setItem('spil_category_brands', JSON.stringify(map));
-    } catch (e) {}
+    // Backend now handles updating the AssetInventory status from 'available' to 'in_use' automatically
+    // during assignItemToSlot, so we don't need to manually update localStorage here.
   };
 
   const updateBrandStockOnUnassign = (category, brandName, modelNumber) => {
@@ -1436,8 +1391,17 @@ const DashboardPage = () => {
                 Pilih Merk / Tipe Terdaftar:
               </label>
 
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', gap: '10px', flexDirection: 'column' }}>
+                {confirmAssignItem.categoryBrands.length === 0 && (
+                  <div style={{ padding: '12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#991b1b', fontSize: '0.875rem', lineHeight: '1.4' }}>
+                    <AlertTriangle size={16} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle', marginTop: '-2px' }} />
+                    <strong>Stok Barang Kosong!</strong> Tidak ada barang "{confirmAssignItem.category?.name}" yang "Siap Pakai" di inventori saat ini. Anda dapat memasukkan merk/tipe manual di bawah ini, atau membatalkan dan menambah stok di menu Inventori terlebih dahulu.
+                  </div>
+                )}
+                
+                {confirmAssignItem.categoryBrands.length > 0 && (
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <div style={{ flex: 1 }}>
                   <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
                     Merk
                   </label>
@@ -1480,6 +1444,8 @@ const DashboardPage = () => {
                         </option>
                       ))}
                     </select>
+                  </div>
+                )}
                   </div>
                 )}
               </div>

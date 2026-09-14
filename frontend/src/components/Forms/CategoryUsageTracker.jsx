@@ -39,14 +39,7 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
 
       const catList = Array.isArray(catsRes) ? catsRes : [];
       
-      // Load local logs saved in localStorage
-      let localLogs = [];
-      try {
-        const saved = localStorage.getItem('spil_local_logs');
-        if (saved) localLogs = JSON.parse(saved);
-      } catch (e) {}
-
-      const mergedLogs = [...localLogs, ...(Array.isArray(logsRes) ? logsRes : [])];
+      const mergedLogs = Array.isArray(logsRes) ? logsRes : [];
 
       setCategories(catList);
       setLogs(mergedLogs);
@@ -98,46 +91,9 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
       return true;
     };
 
-    // 1. Read from localStorage spil_category_brands (Primary source of truth for user-entered inventory!)
-    try {
-      const savedBrands = localStorage.getItem('spil_category_brands');
-      if (savedBrands) {
-        const map = JSON.parse(savedBrands);
-        const catBrands = map[catNameLower] || map[cat.id] || map[cat.name] || [];
-        if (Array.isArray(catBrands) && catBrands.length > 0) {
-          catBrands.forEach(b => {
-            let displayName = b.brand;
-            if (b.model_number && b.model_number !== 'Standard') {
-              displayName = b.brand ? `${b.brand} (${b.model_number})` : b.model_number;
-            }
-            if (!displayName) displayName = b.name;
-
-            if (isValidItemName(displayName, b.brand, b.model_number)) {
-              const currentStock = parseInt(b.stock) || 0;
-              modelStockMap.set(displayName, {
-                name: displayName,
-                brand: b.brand || '',
-                model_number: b.model_number || 'Standard',
-                stock: currentStock
-              });
-            }
-          });
-        }
-      }
-    } catch (e) {
-      console.log('Error reading spil_category_brands:', e);
-    }
-
-    // If user has explicitly registered brand items in inventory, return ONLY those real items!
-    if (modelStockMap.size > 0) {
-      return Array.from(modelStockMap.values());
-    }
-
-    // 2. Fallback: check database assets for custom registered items (excluding slot IDs and dummy codes)
+    // Count stock from backend assets (excluding slot IDs and dummy codes)
     assets.forEach(ast => {
-      const isMatch = ast.category_id === cat.id || 
-                      ast.category?.id === cat.id || 
-                      (ast.category?.name && ast.category.name.toLowerCase() === catNameLower);
+      const isMatch = String(ast.category_id) === String(cat.id);
       if (isMatch) {
         let displayName = ast.brand;
         if (ast.model_number && ast.model_number !== 'Standard') {
@@ -145,14 +101,16 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
         }
 
         if (isValidItemName(displayName, ast.brand, ast.model_number)) {
-          const isAvail = ast.status === 'available' || ast.status === 'good' || !ast.status;
+          const isAvail = ast.status === 'available';
           if (!modelStockMap.has(displayName)) {
             modelStockMap.set(displayName, {
               name: displayName,
               brand: ast.brand || '',
               model_number: ast.model_number || 'Standard',
-              stock: isAvail ? (ast.stock || 1) : 0
+              stock: isAvail ? 1 : 0
             });
+          } else if (isAvail) {
+            modelStockMap.get(displayName).stock += 1;
           }
         }
       }
