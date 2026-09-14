@@ -50,10 +50,15 @@ const EquipmentNode = ({
         if (e.evt) {
           const elem = document.elementFromPoint(e.evt.clientX, e.evt.clientY);
           const hoverFloorId = elem ? elem.getAttribute('data-floor-id') : null;
+          const hoverBuildingId = elem ? elem.getAttribute('data-building-id') : null;
+          
           if (hoverFloorId) {
             window.dispatchEvent(new CustomEvent('konvaDragHoverFloor', { detail: hoverFloorId }));
+          } else if (hoverBuildingId) {
+            window.dispatchEvent(new CustomEvent('konvaDragHoverBuilding', { detail: hoverBuildingId }));
           } else {
             window.dispatchEvent(new CustomEvent('konvaDragHoverFloorEnd'));
+            window.dispatchEvent(new CustomEvent('konvaDragHoverBuildingEnd'));
           }
         }
       }}

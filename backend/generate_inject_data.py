@@ -39,6 +39,8 @@ def format_val(val):
     import uuid
     if isinstance(val, uuid.UUID):
         return f"uuid.UUID('{str(val)}')"
+    if isinstance(val, (list, dict)):
+        return json.dumps(val)
     return f"'{str(val)}'"
 
 async def generate():
@@ -108,6 +110,6 @@ async def generate():
         out.append("    asyncio.run(inject_data())")
 
         with open("inject_data.py", "w") as f:
-            f.write("\\n".join(out))
+            f.write("\n".join(out))
 
 asyncio.run(generate())

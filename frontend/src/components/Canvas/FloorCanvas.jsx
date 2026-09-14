@@ -50,7 +50,7 @@ const FloorCanvas = ({
     const all = [...slots];
     if (crossFloorDraggedItemRef.current && crossFloorDraggedItemRef.current.type === 'slot') {
       if (!all.find(s => s.id === crossFloorDraggedItemRef.current.item.id)) {
-        all.push(crossFloorDraggedItemRef.current.item);
+        all.push({ ...crossFloorDraggedItemRef.current.item, _isGhost: true });
       }
     }
     return all;
@@ -60,7 +60,7 @@ const FloorCanvas = ({
     const all = [...equipments];
     if (crossFloorDraggedItemRef.current && crossFloorDraggedItemRef.current.type === 'equipment') {
       if (!all.find(e => e.id === crossFloorDraggedItemRef.current.item.id)) {
-        all.push(crossFloorDraggedItemRef.current.item);
+        all.push({ ...crossFloorDraggedItemRef.current.item, _isGhost: true });
       }
     }
     return all;

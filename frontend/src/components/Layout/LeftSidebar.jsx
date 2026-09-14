@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Input from '../UI/Input';
 import { Search } from 'lucide-react';
-
+import { getFloors } from '../../api/floors';
 const LeftSidebar = ({ 
   isOpen, onClose, 
   buildings = [], currentBuilding, onSelectBuilding,
@@ -10,8 +10,61 @@ const LeftSidebar = ({
   selectedCategoryIds = [], onSelectCategory
 }) => {
   const [search, setSearch] = useState('');
-  const [expandedBuildingId, setExpandedBuildingId] = React.useState(null);
+  const [expandedBuildingIds, setExpandedBuildingIds] = React.useState([]);
+  const [buildingFloors, setBuildingFloors] = React.useState({});
 
+  React.useEffect(() => {
+    if (currentBuilding && floors) {
+      setBuildingFloors(prev => ({ ...prev, [currentBuilding.id]: floors }));
+    }
+  }, [currentBuilding, floors]);
+
+  React.useEffect(() => {
+    expandedBuildingIds.forEach(id => {
+      if (!buildingFloors[id] && id !== currentBuilding?.id) {
+        getFloors(id).then(flrs => {
+          setBuildingFloors(prev => ({ ...prev, [id]: flrs }));
+        }).catch(err => console.error(err));
+      }
+    });
+  }, [expandedBuildingIds, currentBuilding, buildingFloors]);
+
+  React.useEffect(() => {
+    let buildingHoverTimer = null;
+    let currentHoverBuildingId = null;
+
+    const handleHoverBuilding = (e) => {
+      const bldgId = e.detail;
+      if (!bldgId || bldgId === currentHoverBuildingId) return;
+
+      currentHoverBuildingId = bldgId;
+      if (buildingHoverTimer) clearTimeout(buildingHoverTimer);
+
+      buildingHoverTimer = setTimeout(() => {
+        setExpandedBuildingIds(prev => prev.includes(bldgId) ? prev : [...prev, bldgId]);
+        if (currentBuilding?.id !== bldgId) {
+          onSelectBuilding(bldgId);
+        }
+      }, 400); // 400ms delay to match HTML5 hover
+    };
+
+    const handleHoverBuildingEnd = () => {
+      currentHoverBuildingId = null;
+      if (buildingHoverTimer) {
+        clearTimeout(buildingHoverTimer);
+        buildingHoverTimer = null;
+      }
+    };
+
+    window.addEventListener('konvaDragHoverBuilding', handleHoverBuilding);
+    window.addEventListener('konvaDragHoverBuildingEnd', handleHoverBuildingEnd);
+
+    return () => {
+      window.removeEventListener('konvaDragHoverBuilding', handleHoverBuilding);
+      window.removeEventListener('konvaDragHoverBuildingEnd', handleHoverBuildingEnd);
+      if (buildingHoverTimer) clearTimeout(buildingHoverTimer);
+    };
+  }, [currentBuilding, onSelectBuilding]);
   // Removed automatic expansion on currentBuilding change so buildings remain collapsed by default
 
   const categoryCounts = {};
@@ -57,27 +110,28 @@ const LeftSidebar = ({
           <h3 style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Area & Lantai</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', paddingRight: '4px', paddingBottom: '4px' }}>
             {buildings.map(bldg => {
-              const isExpanded = expandedBuildingId === bldg.id;
+              const isExpanded = expandedBuildingIds.includes(bldg.id);
               
               return (
                 <div key={bldg.id} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {/* Area Header (Accordion Button) */}
                 <button 
+                  data-building-id={bldg.id}
                   onClick={() => {
-                      if (isExpanded) {
-                        setExpandedBuildingId(null);
-                      } else {
-                        setExpandedBuildingId(bldg.id);
-                        if (currentBuilding?.id !== bldg.id) {
-                          onSelectBuilding(bldg.id);
-                        }
-                      }
-                    }}
-                    className={(currentBuilding?.id === bldg.id) ? "neu-inset" : "neu-raised-sm"} 
-                    style={{ 
-                      padding: '12px 16px', 
-                      textAlign: 'left', 
-                      color: (currentBuilding?.id === bldg.id) ? 'var(--color-primary)' : 'var(--color-text-primary)', 
+                    setExpandedBuildingIds(prev => 
+                      prev.includes(bldg.id) 
+                        ? prev.filter(id => id !== bldg.id)
+                        : [...prev, bldg.id]
+                    );
+                    if (!isExpanded && currentBuilding?.id !== bldg.id) {
+                      onSelectBuilding(bldg.id);
+                    }
+                  }}
+                  className={isExpanded ? "neu-inset" : "neu-raised-sm"} 
+                  style={{ 
+                    padding: '12px 16px', 
+                    textAlign: 'left', 
+                    color: isExpanded ? 'var(--color-primary)' : 'var(--color-text-primary)', 
                       fontWeight: '700', 
                       border: 'none', 
                       background: 'transparent',
@@ -98,9 +152,9 @@ const LeftSidebar = ({
                   </button>
 
                   {/* Floors Dropdown List */}
-                  {(isExpanded && currentBuilding?.id === bldg.id) && (
+                  {isExpanded && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingLeft: '16px', marginTop: '2px' }}>
-                      {floors.map(floor => {
+                      {(buildingFloors[bldg.id] || []).map(floor => {
                         const isActive = currentFloor?.id === floor.id;
                         return (
                           <button 
@@ -123,7 +177,7 @@ const LeftSidebar = ({
                           </button>
                         );
                       })}
-                      {floors.length === 0 && (
+                      {(buildingFloors[bldg.id] || []).length === 0 && (
                         <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'center', padding: '8px 0' }}>Belum ada lantai</p>
                       )}
                     </div>
