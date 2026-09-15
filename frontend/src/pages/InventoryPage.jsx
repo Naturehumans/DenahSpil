@@ -42,7 +42,8 @@ const InventoryPage = () => {
     stock: '1',
     min_stock: '1',
     warranty_months: '0',
-    purchase_date: ''
+    purchase_date: '',
+    ac_type: 'in_out'
   });
 
   // Stock & Damaged modals
@@ -151,24 +152,34 @@ const InventoryPage = () => {
       let map = {};
       if (assets && Array.isArray(assets)) {
         assets.forEach(asset => {
-          const key = `${asset.category_id}_${(asset.brand || 'Tanpa Merk').toLowerCase()}_${(asset.model_number || 'Standard').toLowerCase()}`;
+          let partType = '';
+          let partName = '';
+          // REMOVED appending partName to model_number so they group together
+          // We will store the assets, and UI can display IN/OUT based on asset.ac_type
+          
+          const baseModel = (asset.model_number || 'Standard');
+          const key = `${asset.category_id}_${(asset.brand || 'Tanpa Merk').toLowerCase()}_${baseModel.toLowerCase()}`;
           if (!map[key]) {
             map[key] = {
-              id: `b_${asset.category_id}_${asset.brand}_${asset.model_number}`,
+              id: `b_${asset.category_id}_${asset.brand}_${baseModel}`,
               category_id: asset.category_id,
               category_name: asset.category?.name || 'Umum',
               category_color: asset.category?.color || '#3b82f6',
               brand: asset.brand || 'Tanpa Merk',
-              model_number: asset.model_number || 'Standard',
-              stock: 0, // We will calculate true stock below
-              asset_count: 0, // Track actual backend assets
+              model_number: baseModel,
+              original_model: baseModel,
+              ac_type: 'in_out', // Set a default or derived type if needed
+              stock: 0,
+              asset_count: 0,
               min_stock: 1,
               warranty_months: 0,
               purchase_date: null,
-              expired_date: null
+              expired_date: null,
+              assets: []
             };
           }
           map[key].asset_count += 1;
+          map[key].assets.push(asset);
         });
       }
 
@@ -181,22 +192,25 @@ const InventoryPage = () => {
             parsedBrands[catNameKey].forEach(b => {
               const cat = cats.find(c => c.id === b.category_id || (c.name || '').toLowerCase() === catNameKey);
               const catId = b.category_id || (cat ? cat.id : catNameKey);
-              const key = `${catId}_${(b.brand || 'Tanpa Merk').toLowerCase()}_${(b.model_number || 'Standard').toLowerCase()}`;
+              const baseModel = b.model_number || 'Standard';
+              const key = `${catId}_${(b.brand || 'Tanpa Merk').toLowerCase()}_${baseModel.toLowerCase()}`;
               
               if (!map[key]) {
                 map[key] = {
-                  id: b.id || `b_${catId}_${b.brand}_${b.model_number}`,
+                  id: b.id || `b_${catId}_${b.brand}_${baseModel}`,
                   category_id: catId,
                   category_name: cat?.name || catNameKey,
                   category_color: cat?.color || '#3b82f6',
                   brand: b.brand || 'Tanpa Merk',
-                  model_number: b.model_number || 'Standard',
+                  model_number: baseModel,
+                  original_model: baseModel,
                   stock: 0,
                   asset_count: 0,
                   min_stock: parseInt(b.min_stock) || 1,
                   warranty_months: parseInt(b.warranty_months) || 0,
                   purchase_date: null,
-                  expired_date: null
+                  expired_date: null,
+                  assets: []
                 };
               }
               // The true stock is either the local storage stock OR the asset count, whichever is larger 
@@ -373,9 +387,10 @@ const InventoryPage = () => {
       model_number: '',
       stock: '1',
       min_stock: '1',
-      warranty_months: '0',
+      warranty_months: 0,
       purchase_date: '',
-      expired_date: ''
+      expired_date: '',
+      ac_type: 'in_out'
     });
     setShowAddBrandModal(true);
   };
@@ -397,7 +412,8 @@ const InventoryPage = () => {
         category_id: selectedCategoryView.id,
         brand: brandForm.brand.trim(),
         model_number: brandForm.model_number.trim() || 'Standard',
-        quantity: stock
+        quantity: stock,
+        ac_type: (selectedCategoryView.name || '').toUpperCase().includes('AC') ? brandForm.ac_type : undefined
       });
 
       showToast(`Berhasil menambah barang ${brandForm.brand.trim()}!`, 'success');
@@ -417,8 +433,9 @@ const InventoryPage = () => {
       await addStockToInventory({
         category_id: item.category_id,
         brand: item.brand,
-        model_number: item.model_number || 'Standard',
-        quantity: 1
+        model_number: item.original_model || item.model_number || 'Standard',
+        quantity: 1,
+        ac_type: (item.category_name || '').toUpperCase().includes('AC') ? (item.ac_type || 'in_out') : undefined
       });
       
       // Sync local storage
@@ -430,7 +447,7 @@ const InventoryPage = () => {
           if (parsed[catKey]) {
             const existingBrand = parsed[catKey].find(b => 
               (b.brand || '').toLowerCase() === (item.brand || '').toLowerCase() &&
-              (b.model_number || '').toLowerCase() === (item.model_number || '').toLowerCase()
+              (b.model_number || '').toLowerCase() === (item.original_model || item.model_number || '').toLowerCase()
             );
             if (existingBrand) {
               existingBrand.stock = (parseInt(existingBrand.stock) || 0) + 1;
@@ -451,10 +468,10 @@ const InventoryPage = () => {
     e.stopPropagation();
     if (item.stock <= 0) return;
     try {
-      const assetToRemove = availableAssets.find(a => 
+      const assetToRemove = (item.assets && item.assets.length > 0) ? item.assets[0] : availableAssets.find(a => 
         String(a.category_id) === String(item.category_id) && 
         (a.brand || 'Tanpa Merk').toLowerCase() === (item.brand || 'Tanpa Merk').toLowerCase() &&
-        (a.model_number || 'Standard').toLowerCase() === (item.model_number || 'Standard').toLowerCase()
+        (a.model_number || 'Standard').toLowerCase() === (item.original_model || item.model_number || 'Standard').toLowerCase()
       );
       if (assetToRemove) {
         await deleteAsset(assetToRemove.id);
@@ -494,8 +511,9 @@ const InventoryPage = () => {
       await addStockToInventory({
         category_id: addStockModal.category_id,
         brand: addStockModal.brand,
-        model_number: addStockModal.model_number || 'Standard',
-        quantity: parseInt(stockToAdd)
+        model_number: addStockModal.original_model || addStockModal.model_number || 'Standard',
+        quantity: parseInt(stockToAdd),
+        ac_type: (addStockModal.category_name || '').toUpperCase().includes('AC') ? acType : undefined
       });
       
       // Update local storage to keep it in sync
@@ -507,7 +525,7 @@ const InventoryPage = () => {
           if (parsed[catKey]) {
             const existingBrand = parsed[catKey].find(b => 
               (b.brand || '').toLowerCase() === (addStockModal.brand || '').toLowerCase() &&
-              (b.model_number || '').toLowerCase() === (addStockModal.model_number || '').toLowerCase()
+              (b.model_number || '').toLowerCase() === (addStockModal.original_model || addStockModal.model_number || '').toLowerCase()
             );
             if (existingBrand) {
               existingBrand.stock = (parseInt(existingBrand.stock) || 0) + parseInt(stockToAdd);
@@ -1060,7 +1078,7 @@ const InventoryPage = () => {
                           {isAdmin && (
                             <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
                               <button 
-                                onClick={(e) => { e.stopPropagation(); setAddStockModal(item); }}
+                                onClick={(e) => { e.stopPropagation(); setAddStockModal(item); setAcType(item.ac_type || 'in_out'); }}
                                 style={{ 
                                   flex: 1, padding: '10px', borderRadius: '10px', 
                                   background: '#f8fafc', color: '#475569', border: '1px solid #e2e8f0',
@@ -1228,6 +1246,11 @@ const InventoryPage = () => {
                             <div>
                               <strong style={{ display: 'block', color: 'var(--color-text-primary)' }}>
                                 {it.name || it.asset_id || it.id}
+                                {it.ac_type && it.ac_type !== 'in_out' ? (
+                                  <span style={{ marginLeft: '8px', padding: '2px 6px', background: 'var(--color-primary)', color: 'white', fontSize: '0.7rem', borderRadius: '4px' }}>
+                                    {it.ac_type.toUpperCase()}
+                                  </span>
+                                ) : null}
                               </strong>
                               <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', display: 'block' }}>
                                 Ditambahkan/Diubah: {new Date(it.placed_at || it.unassigned_at || it.date || it.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
@@ -1414,6 +1437,23 @@ const InventoryPage = () => {
                   style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '0.95rem', outline: 'none' }}
                 />
               </div>
+
+              { (selectedCategoryView?.name || '').toUpperCase().includes('AC') && (
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--color-text)' }}>
+                    Bagian AC yang ditambahkan
+                  </label>
+                  <select
+                    value={brandForm.ac_type}
+                    onChange={(e) => setBrandForm({ ...brandForm, ac_type: e.target.value })}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '0.95rem', outline: 'none', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+                  >
+                    <option value="in_out">Keduanya (Unit Dalam & Kompresor)</option>
+                    <option value="in">Hanya Unit Dalam (IN)</option>
+                    <option value="out">Hanya Kompresor (OUT)</option>
+                  </select>
+                </div>
+              )}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>

@@ -17,6 +17,7 @@ class AssetInventoryBase(BaseModel):
     status: str
     brand: Optional[str] = None
     model_number: Optional[str] = None
+    ac_type: Optional[str] = None
 
 class AssetInventoryResponse(AssetInventoryBase):
     id: uuid.UUID

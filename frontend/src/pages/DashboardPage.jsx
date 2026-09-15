@@ -34,7 +34,8 @@ import {
   deleteSlot, 
   assignItemToSlot, 
   moveItemBetweenSlots, 
-  unassignItemFromSlot 
+  unassignItemFromSlot,
+  replaceItemInSlot
 } from '../api/slots';
 import { getRoomPolygonsByFloor, createRoomPolygon, deleteRoomPolygon } from '../api/roomPolygons';
 import { getAssets } from '../api/inventory';
@@ -135,20 +136,6 @@ const DashboardPage = () => {
   }, [showToast]);
 
   useEffect(() => {
-    if (pendingReplacement) {
-      const slot = slots.find(s => s.id === pendingReplacement.slotId);
-      // Wait for the slot to become empty before triggering the drop
-      if (slot && !slot.equipment_id && !slot.equipment && pendingActionRef.current) {
-        pendingActionRef.current = false;
-        handleItemDropOnSlot(
-          pendingReplacement.categoryId, 
-          pendingReplacement.slotId, 
-          pendingReplacement.selectedBrand, 
-          pendingReplacement.selectedModel
-        );
-        setPendingReplacement(null);
-      }
-    }
     if (pendingSlotMove) {
       const targetSlot = slots.find(s => s.id === pendingSlotMove.targetSlotId);
       const sourceSlot = slots.find(s => s.id === pendingSlotMove.sourceSlotId);
@@ -318,7 +305,7 @@ const DashboardPage = () => {
     setIsDrawingPolygon(false);
   };
 
-  const handleItemDropOnSlot = async (categoryId, slotId, preselectedBrand = null, preselectedModel = null) => {
+  const handleItemDropOnSlot = async (categoryId, slotId, preselectedBrand = null, preselectedModel = null, preselectedAcType = null) => {
     if (!slotId) {
       showToast('Letakkan barang di atas slot yang sudah ada', 'warning');
       return;
@@ -361,24 +348,14 @@ const DashboardPage = () => {
     const firstModel = firstAvailableBrand?.model_number || '';
     const isCustomDefault = !firstAvailableBrand;
 
-    if (slot.equipment_id || slot.equipment) {
-      setSelectedSlot(slot);
-      pendingActionRef.current = true;
-      setPendingReplacement({ 
-        categoryId, 
-        slotId, 
-        category: cat,
-        categoryBrands, 
-        selectedBrand: firstBrand, 
-        selectedModel: firstModel 
-      });
-      setActiveModal('unassign_destination');
-      return;
-    }
+    const isAC = (cat?.name || '').toUpperCase().includes('AC');
+    const isReplacement = !!(slot.equipment_id || slot.equipment);
 
-    if (preselectedBrand) {
+    if (preselectedBrand && (!isAC || preselectedAcType)) {
       try {
-        const updatedSlot = await assignItemToSlot(slotId, preselectedBrand, preselectedModel);
+        // If quick-assigning, we can't easily select ID without UI, so we just pass empty string to let it fail or we should disable quick assign for AC if we require ID?
+        // Let's pass empty strings for now. If backend requires ID, it will fail.
+        const updatedSlot = await assignItemToSlot(slotId, preselectedBrand, preselectedModel, preselectedAcType, '', '');
         setSlots(prev => prev.map(s => s.id === slotId ? updatedSlot : s));
         if (cat) {
           updateBrandStockOnAssign(cat, preselectedBrand, preselectedModel);
@@ -398,11 +375,16 @@ const DashboardPage = () => {
       category: cat,
       slot,
       categoryBrands,
+      categoryAssets,
       selectedBrand: firstBrand,
       selectedModel: firstModel,
       isCustom: isCustomDefault,
       customBrand: '',
-      customModel: ''
+      customModel: '',
+      acAssignType: isAC ? 'in_out' : undefined,
+      acInAssetId: '',
+      acOutAssetId: '',
+      isReplacement
     });
   };
 
@@ -445,6 +427,9 @@ const DashboardPage = () => {
   };
 
   const saveToDamagedInventory = (category, equipment) => {
+    // If backend tracks it with AssetInventory (has_id), do not save to local storage to prevent duplicates
+    if (category?.has_id) return;
+    
     try {
       const stored = localStorage.getItem('spil_damaged_inventory');
       const items = stored ? JSON.parse(stored) : [];
@@ -469,7 +454,7 @@ const DashboardPage = () => {
   const confirmAssignEquipmentToSlot = async () => {
     if (!confirmAssignItem) return;
     try {
-      const { slotId, selectedBrand, selectedModel, isCustom, customBrand, customModel, category } = confirmAssignItem;
+      const { slotId, selectedBrand, selectedModel, isCustom, customBrand, customModel, category, acAssignType, acInAssetId, acOutAssetId } = confirmAssignItem;
       const finalBrand = isCustom ? customBrand.trim() : selectedBrand;
       const finalModel = isCustom ? customModel.trim() : selectedModel;
 
@@ -478,8 +463,39 @@ const DashboardPage = () => {
         return;
       }
 
-      const updatedSlot = await assignItemToSlot(slotId, finalBrand, finalModel);
+      if (!isCustom && acAssignType) {
+        if ((acAssignType === 'in' || acAssignType === 'in_out') && !acInAssetId) {
+          showToast('Silakan pilih ID Unit Dalam (IN)', 'warning');
+          return;
+        }
+        if ((acAssignType === 'out' || acAssignType === 'in_out') && !acOutAssetId) {
+          showToast('Silakan pilih ID Kompresor (OUT)', 'warning');
+          return;
+        }
+      }
+
+      if (confirmAssignItem.isReplacement) {
+        setPendingReplacement({
+          ...confirmAssignItem,
+          selectedBrand: finalBrand,
+          selectedModel: finalModel,
+        });
+        setActiveModal('unassign_destination');
+        setConfirmAssignItem(null);
+        return;
+      }
+
+      const updatedSlot = await assignItemToSlot(slotId, finalBrand, finalModel, acAssignType, acInAssetId, acOutAssetId);
       setSlots(prev => prev.map(s => s.id === slotId ? updatedSlot : s));
+      if (updatedSlot.equipment) {
+        setEquipments(prev => {
+          const exists = prev.find(e => e.id === updatedSlot.equipment.id);
+          if (exists) {
+            return prev.map(e => e.id === updatedSlot.equipment.id ? updatedSlot.equipment : e);
+          }
+          return [...prev, updatedSlot.equipment];
+        });
+      }
       
       // Reduce brand stock by 1
       if (category) {
@@ -571,21 +587,42 @@ const DashboardPage = () => {
         formattedDate = d.toISOString();
       }
 
-      if (slotToUnassign && slotToUnassign.equipment_id) {
-        setEquipments(prev => prev.filter(e => e.id !== slotToUnassign.equipment_id));
-      }
+      if (pendingReplacement) {
+        const { selectedBrand, selectedModel, acAssignType, acInAssetId, acOutAssetId } = pendingReplacement;
+        const updatedSlot = await replaceItemInSlot(slotId, selectedBrand, selectedModel, acAssignType, destination, formattedDate, acInAssetId, acOutAssetId);
+        setSlots(prev => prev.map(s => s.id === slotId ? updatedSlot : s));
+        if (updatedSlot.equipment) {
+          setEquipments(prev => {
+            const exists = prev.find(e => e.id === updatedSlot.equipment.id);
+            if (exists) {
+              return prev.map(e => e.id === updatedSlot.equipment.id ? updatedSlot.equipment : e);
+            }
+            return [...prev, updatedSlot.equipment];
+          });
+        }
+        setPendingReplacement(null);
+        pendingActionRef.current = false;
+        
+        if (cat) {
+          updateBrandStockOnAssign(cat, selectedBrand, selectedModel);
+        }
+      } else {
+        if (slotToUnassign && slotToUnassign.equipment_id) {
+          setEquipments(prev => prev.filter(e => e.id !== slotToUnassign.equipment_id));
+        }
 
-      await unassignItemFromSlot(slotId, destination, formattedDate);
-      setSlots(prev => prev.map(s => s.id === slotId ? { ...s, equipment_id: null, equipment: null } : s));
-      
-      // If returned to "Masuk Inventori Baru (Stok Siap Pakai)", restore brand stock by 1
-      if (destination === 'good' && cat) {
-        updateBrandStockOnUnassign(cat, eq?.brand || slotToUnassign?.brand, eq?.model_number || slotToUnassign?.model_number);
-      }
+        await unassignItemFromSlot(slotId, destination, formattedDate);
+        setSlots(prev => prev.map(s => s.id === slotId ? { ...s, equipment_id: null, equipment: null } : s));
+        
+        // If returned to "Masuk Inventori Baru (Stok Siap Pakai)", restore brand stock by 1
+        if (destination === 'good' && cat) {
+          updateBrandStockOnUnassign(cat, eq?.brand || slotToUnassign?.brand, eq?.model_number || slotToUnassign?.model_number);
+        }
 
-      // If moved to "Masuk Inventori Rusak (Perbaikan)", save to spil_damaged_inventory
-      if (destination === 'damaged') {
-        saveToDamagedInventory(cat, eq || slotToUnassign);
+        // If moved to "Masuk Inventori Rusak (Perbaikan)", save to spil_damaged_inventory
+        if (destination === 'damaged') {
+          saveToDamagedInventory(cat, eq || slotToUnassign);
+        }
       }
 
       // refresh categories to update stock
@@ -1399,53 +1436,133 @@ const DashboardPage = () => {
                   </div>
                 )}
                 
-                {confirmAssignItem.categoryBrands.length > 0 && (
-                  <div style={{ display: 'flex', gap: '10px' }}>
-                    <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
-                    Merk
-                  </label>
-                  <select 
-                    value={confirmAssignItem.isCustom ? 'custom' : confirmAssignItem.selectedBrand}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === 'custom') {
-                        setConfirmAssignItem({ ...confirmAssignItem, isCustom: true });
-                      } else {
-                        const models = confirmAssignItem.categoryBrands.filter(b => b.brand === val);
-                        const firstModel = models.length > 0 ? models[0].model_number : '';
-                        setConfirmAssignItem({ ...confirmAssignItem, isCustom: false, selectedBrand: val, selectedModel: firstModel });
-                      }
-                    }}
-                    className="neu-inset"
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.875rem', outline: 'none' }}
-                  >
-                    {Array.from(new Set(confirmAssignItem.categoryBrands.map(b => b.brand))).map((brand, idx) => (
-                      <option key={idx} value={brand}>{brand}</option>
-                    ))}
-                    <option value="custom">+ Input Merk/Tipe Manual</option>
-                  </select>
-                </div>
-                
-                {!confirmAssignItem.isCustom && (
-                  <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
-                      Kode Barang (Tipe)
+                { (confirmAssignItem.category?.name || '').toUpperCase().includes('AC') && (
+                  <div style={{ marginTop: '4px' }}>
+                    <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text-primary)', marginBottom: '8px' }}>
+                      Bagian AC yang dipasang
                     </label>
-                    <select 
-                      value={confirmAssignItem.selectedModel}
-                      onChange={(e) => setConfirmAssignItem({ ...confirmAssignItem, selectedModel: e.target.value })}
-                      className="neu-inset"
-                      style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.875rem', outline: 'none' }}
+                    <select
+                      value={confirmAssignItem.acAssignType || 'in_out'}
+                      onChange={(e) => setConfirmAssignItem({ ...confirmAssignItem, acAssignType: e.target.value })}
+                      style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '1rem', outline: 'none', background: 'var(--color-bg)', color: 'var(--color-text)' }}
                     >
-                      {confirmAssignItem.categoryBrands.filter(b => b.brand === confirmAssignItem.selectedBrand).map((b, idx) => (
-                        <option key={idx} value={b.model_number} disabled={b.stock === 0}>
-                          {b.model_number || 'Standard'} {b.stock !== undefined ? `(Stok: ${b.stock})` : ''}
-                        </option>
-                      ))}
+                      <option value="in_out">Keduanya (Unit Dalam & Kompresor)</option>
+                      <option value="in">Hanya Unit Dalam (IN)</option>
+                      <option value="out">Hanya Kompresor (OUT)</option>
                     </select>
                   </div>
                 )}
+
+                {confirmAssignItem.categoryBrands.length > 0 && (
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
+                        Merk
+                      </label>
+                      <select 
+                        value={confirmAssignItem.isCustom ? 'custom' : confirmAssignItem.selectedBrand}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === 'custom') {
+                            setConfirmAssignItem({ ...confirmAssignItem, isCustom: true });
+                          } else {
+                            const models = confirmAssignItem.categoryBrands.filter(b => b.brand === val);
+                            const firstModel = models.length > 0 ? models[0].model_number : '';
+                            setConfirmAssignItem({ ...confirmAssignItem, isCustom: false, selectedBrand: val, selectedModel: firstModel });
+                          }
+                        }}
+                        className="neu-inset"
+                        style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.875rem', outline: 'none' }}
+                      >
+                        {Array.from(new Set(confirmAssignItem.categoryBrands.map(b => b.brand))).map((brand, idx) => (
+                          <option key={idx} value={brand}>{brand}</option>
+                        ))}
+                        <option value="custom">+ Input Merk/Tipe Manual</option>
+                      </select>
+                    </div>
+                    
+                    {!confirmAssignItem.isCustom && (
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
+                          Kode Barang (Tipe)
+                        </label>
+                        <select 
+                          value={confirmAssignItem.selectedModel}
+                          onChange={(e) => setConfirmAssignItem({ ...confirmAssignItem, selectedModel: e.target.value })}
+                          className="neu-inset"
+                          style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.875rem', outline: 'none' }}
+                        >
+                          {confirmAssignItem.categoryBrands.filter(b => b.brand === confirmAssignItem.selectedBrand).map((b, idx) => (
+                            <option key={idx} value={b.model_number} disabled={b.stock === 0}>
+                              {b.model_number || 'Standard'} {b.stock !== undefined ? `(Stok: ${b.stock})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {confirmAssignItem.acAssignType && !confirmAssignItem.isCustom && (
+                  <div style={{ marginTop: '16px' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
+                      Tipe Pemasangan / Penggantian AC
+                    </label>
+                    <select 
+                      value={confirmAssignItem.acAssignType}
+                      onChange={(e) => setConfirmAssignItem({ ...confirmAssignItem, acAssignType: e.target.value, acInAssetId: '', acOutAssetId: '' })}
+                      className="neu-inset"
+                      style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.875rem', outline: 'none' }}
+                    >
+                      <option value="in_out">Keduanya (IN & OUT)</option>
+                      <option value="in">Hanya Unit Dalam (IN)</option>
+                      <option value="out">Hanya Kompresor (OUT)</option>
+                    </select>
+                  </div>
+                )}
+                
+                {confirmAssignItem.acAssignType && !confirmAssignItem.isCustom && (
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                    {(confirmAssignItem.acAssignType === 'in' || confirmAssignItem.acAssignType === 'in_out') && (
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
+                          ID Unit Dalam (IN) *
+                        </label>
+                        <select 
+                          value={confirmAssignItem.acInAssetId || ''}
+                          onChange={(e) => setConfirmAssignItem({ ...confirmAssignItem, acInAssetId: e.target.value })}
+                          className="neu-inset"
+                          style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.875rem', outline: 'none' }}
+                        >
+                          <option value="">-- Pilih ID Unit IN --</option>
+                          {confirmAssignItem.categoryAssets
+                            .filter(a => a.brand === confirmAssignItem.selectedBrand && a.model_number === confirmAssignItem.selectedModel && a.ac_type === 'in' && a.status === 'available')
+                            .map((a, idx) => (
+                              <option key={idx} value={a.asset_id}>{a.asset_id}</option>
+                            ))}
+                        </select>
+                      </div>
+                    )}
+                    {(confirmAssignItem.acAssignType === 'out' || confirmAssignItem.acAssignType === 'in_out') && (
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
+                          ID Kompresor (OUT) *
+                        </label>
+                        <select 
+                          value={confirmAssignItem.acOutAssetId || ''}
+                          onChange={(e) => setConfirmAssignItem({ ...confirmAssignItem, acOutAssetId: e.target.value })}
+                          className="neu-inset"
+                          style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.875rem', outline: 'none' }}
+                        >
+                          <option value="">-- Pilih ID Unit OUT --</option>
+                          {confirmAssignItem.categoryAssets
+                            .filter(a => a.brand === confirmAssignItem.selectedBrand && a.model_number === confirmAssignItem.selectedModel && a.ac_type === 'out' && a.status === 'available')
+                            .map((a, idx) => (
+                              <option key={idx} value={a.asset_id}>{a.asset_id}</option>
+                            ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1655,9 +1772,23 @@ const DashboardPage = () => {
                 <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.5px' }}>
                   ID BARANG (ASET)
                 </p>
-                <p style={{ margin: '6px 0 0', fontWeight: '800', color: '#2563eb', fontSize: '1.05rem' }}>
+                <div style={{ margin: '6px 0 0', fontWeight: '800', color: '#2563eb', fontSize: '1.05rem' }}>
                   {selectedEquipment.name}
-                </p>
+                  {(selectedEquipment.ac_in_asset_id || selectedEquipment.ac_out_asset_id) && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px', fontSize: '0.85rem' }}>
+                      {selectedEquipment.ac_in_asset_id && (
+                        <div style={{ background: 'rgba(37,99,235,0.1)', padding: '2px 8px', borderRadius: '4px', display: 'inline-block' }}>
+                          IN: {selectedEquipment.ac_in_asset_id}
+                        </div>
+                      )}
+                      {selectedEquipment.ac_out_asset_id && (
+                        <div style={{ background: 'rgba(37,99,235,0.1)', padding: '2px 8px', borderRadius: '4px', display: 'inline-block' }}>
+                          OUT: {selectedEquipment.ac_out_asset_id}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div style={{ background: 'rgba(255, 255, 255, 0.5)', padding: '12px 14px', borderRadius: '10px' }}>
@@ -1801,8 +1932,16 @@ const DashboardPage = () => {
           </p>
 
           {(pendingReplacement || pendingSlotMove) && (() => {
-            const outgoingItem = selectedSlot?.equipment || selectedEquipment;
-            const outgoingCode = outgoingItem ? (outgoingItem.name || outgoingItem.asset_id || outgoingItem.slot_code || outgoingItem.brand || 'Tanpa Kode') : '-';
+            const outgoingItem = selectedSlot?.equipment || selectedEquipment || pendingReplacement?.slot?.equipment;
+            let outgoingCode = outgoingItem ? (outgoingItem.name || outgoingItem.asset_id || outgoingItem.slot_code || outgoingItem.brand || 'Tanpa Kode') : '-';
+            
+            if (pendingReplacement && pendingReplacement.acAssignType && outgoingItem && (outgoingItem.ac_in_asset_id || outgoingItem.ac_out_asset_id)) {
+              if (pendingReplacement.acAssignType === 'in' && outgoingItem.ac_in_asset_id) {
+                outgoingCode = outgoingItem.ac_in_asset_id;
+              } else if (pendingReplacement.acAssignType === 'out' && outgoingItem.ac_out_asset_id) {
+                outgoingCode = outgoingItem.ac_out_asset_id;
+              }
+            }
             
             let incomingCode = '-';
             if (pendingSlotMove) {
@@ -1837,6 +1976,18 @@ const DashboardPage = () => {
                       <option key={idx} value={b.model_number}>{b.model_number || 'Standard'}</option>
                     ))}
                   </select>
+                  { (pendingReplacement.category?.name || '').toUpperCase().includes('AC') && (
+                    <select
+                      value={pendingReplacement.acAssignType || 'in_out'}
+                      onChange={(e) => setPendingReplacement(prev => ({...prev, acAssignType: e.target.value}))}
+                      style={{ background: 'var(--color-bg, #fff)', border: '1px solid var(--color-border, #ccc)', borderRadius: '6px', padding: '4px 8px', fontSize: '0.85rem', color: 'var(--color-text, #333)', maxWidth: '120px', outline: 'none', cursor: 'pointer' }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <option value="in_out">IN & OUT</option>
+                      <option value="in">Hanya IN</option>
+                      <option value="out">Hanya OUT</option>
+                    </select>
+                  )}
                 </div>
               );
             }
@@ -1884,7 +2035,8 @@ const DashboardPage = () => {
             <button 
               className="neu-inset"
               onClick={() => {
-                if (selectedSlot) handleUnassignItem(selectedSlot.id, 'good');
+                if (pendingReplacement) handleUnassignItem(pendingReplacement.slotId, 'good');
+                else if (selectedSlot) handleUnassignItem(selectedSlot.id, 'good');
                 else if (selectedEquipment) handleDeleteEquipmentDetail('good');
               }}
               style={{ 
@@ -1902,7 +2054,8 @@ const DashboardPage = () => {
             <button 
               className="neu-inset"
               onClick={() => {
-                if (selectedSlot) handleUnassignItem(selectedSlot.id, 'damaged');
+                if (pendingReplacement) handleUnassignItem(pendingReplacement.slotId, 'damaged');
+                else if (selectedSlot) handleUnassignItem(selectedSlot.id, 'damaged');
                 else if (selectedEquipment) handleDeleteEquipmentDetail('damaged');
               }}
               style={{ 
@@ -1920,7 +2073,8 @@ const DashboardPage = () => {
             <button 
               className="neu-inset"
               onClick={() => {
-                if (selectedSlot) handleUnassignItem(selectedSlot.id, 'discard');
+                if (pendingReplacement) handleUnassignItem(pendingReplacement.slotId, 'discard');
+                else if (selectedSlot) handleUnassignItem(selectedSlot.id, 'discard');
                 else if (selectedEquipment) handleDeleteEquipmentDetail('discard');
               }}
               style={{ 

@@ -89,7 +89,7 @@ async def get_next_asset_ids(
 
     max_num = 0
     for n in all_names:
-        match = re.search(rf'{prefix}-(\d+)$', n.strip())
+        match = re.search(rf'{prefix}-(\d+)', n.strip())
         if match:
             num = int(match.group(1))
             if num > max_num:

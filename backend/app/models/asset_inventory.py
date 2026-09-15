@@ -14,7 +14,8 @@ class AssetInventory(Base):
     status = Column(String(50), nullable=False, default="available")
     brand = Column(String(100), nullable=True)
     model_number = Column(String(100), nullable=True)
-    
+    ac_type = Column(String(20), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     

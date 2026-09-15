@@ -15,6 +15,8 @@ class EquipmentBase(BaseModel):
     position_y: float
     status: Literal['active', 'warning', 'expired', 'replaced', 'damaged'] = 'active'
     notes: Optional[str] = None
+    ac_in_asset_id: Optional[str] = None
+    ac_out_asset_id: Optional[str] = None
 
 class EquipmentCreate(EquipmentBase):
     category_id: uuid.UUID

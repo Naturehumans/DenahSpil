@@ -110,6 +110,7 @@ async def add_stock(data: dict, db: AsyncSession = Depends(get_db), current_user
     brand = data.get("brand")
     model_number = data.get("model_number")
     quantity = int(data.get("quantity", 1))
+    ac_type = data.get("ac_type")
 
     # Fetch category
     from app.models.equipment_category import EquipmentCategory
@@ -126,31 +127,44 @@ async def add_stock(data: dict, db: AsyncSession = Depends(get_db), current_user
     new_asset_ids = await get_next_asset_ids(cat_name, brand, model_number, db, category_id, quantity)
 
     for i in range(quantity):
-        asset_id = new_asset_ids[i]
+        base_asset_id = new_asset_ids[i]
         
-        asset_inv = AssetInventory(
-            category_id=category_id,
-            asset_id=asset_id,
-            status='available',
-            brand=brand,
-            model_number=model_number
-        )
-        db.add(asset_inv)
-
-        log = InventoryHistoryLog(
-            category_id=category_id,
-            asset_id=asset_id,
-            action_type='add_stock',
-            building_name="Gudang Utama",
-            floor_name="-",
-            room_name="-",
-            brand=brand,
-            model_number=model_number,
-            status="Siap Pakai",
-            location_info=f"Stok Masuk Gudang ({cat_name})",
-            performed_by=current_user.id
-        )
-        db.add(log)
+        parts_to_create = []
+        if ac_type == 'in':
+            parts_to_create.append(('in', f"{base_asset_id}-IN"))
+        elif ac_type == 'out':
+            parts_to_create.append(('out', f"{base_asset_id}-OUT"))
+        elif ac_type == 'in_out':
+            parts_to_create.append(('in', f"{base_asset_id}-IN"))
+            parts_to_create.append(('out', f"{base_asset_id}-OUT"))
+        else:
+            parts_to_create.append((None, base_asset_id))
+            
+        for p_type, asset_id in parts_to_create:
+            asset_inv = AssetInventory(
+                category_id=category_id,
+                asset_id=asset_id,
+                status='available',
+                brand=brand,
+                model_number=model_number,
+                ac_type=p_type
+            )
+            db.add(asset_inv)
+    
+            log = InventoryHistoryLog(
+                category_id=category_id,
+                asset_id=asset_id,
+                action_type='add_stock',
+                building_name="Gudang Utama",
+                floor_name="-",
+                room_name="-",
+                brand=brand,
+                model_number=model_number,
+                status="Siap Pakai",
+                location_info=f"Stok Masuk Gudang ({cat_name})",
+                performed_by=current_user.id
+            )
+            db.add(log)
         
     await db.commit()
     return {"success": True}

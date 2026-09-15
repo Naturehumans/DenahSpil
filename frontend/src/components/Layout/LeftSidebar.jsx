@@ -127,6 +127,15 @@ const LeftSidebar = ({
                       onSelectBuilding(bldg.id);
                     }
                   }}
+                  onDragEnter={(e) => {
+                    e.preventDefault();
+                    window.dispatchEvent(new CustomEvent('konvaDragHoverBuilding', { detail: bldg.id }));
+                  }}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    window.dispatchEvent(new CustomEvent('konvaDragHoverBuildingEnd'));
+                  }}
                   className={isExpanded ? "neu-inset" : "neu-raised-sm"} 
                   style={{ 
                     padding: '12px 16px', 
@@ -161,6 +170,15 @@ const LeftSidebar = ({
                             key={floor.id}
                             data-floor-id={floor.id}
                             onClick={() => onSelectFloor(floor)}
+                            onDragEnter={(e) => {
+                              e.preventDefault();
+                              window.dispatchEvent(new CustomEvent('konvaDragHoverFloor', { detail: floor.id }));
+                            }}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDragLeave={(e) => {
+                              e.preventDefault();
+                              window.dispatchEvent(new CustomEvent('konvaDragHoverFloorEnd'));
+                            }}
                             className={isActive ? "neu-inset" : "neu-raised-sm"} 
                             style={{ 
                               padding: '10px 16px', 
