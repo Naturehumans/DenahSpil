@@ -4,7 +4,7 @@ import { getBuildings } from '../../api/buildings';
 import { getCategories } from '../../api/categories';
 import { getAllEquipments } from '../../api/equipments';
 import { getAllSlots } from '../../api/slots';
-import { getInventoryLogs } from '../../api/inventory';
+import { getInventoryLogs, getAssets } from '../../api/inventory';
 import { useToast } from '../../contexts/ToastContext';
 import { RefreshCw, Search, FileSpreadsheet } from 'lucide-react';
 import Skeleton from '../UI/Skeleton';
@@ -16,7 +16,9 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
   const [equipments, setEquipments] = useState([]);
   const [slots, setSlots] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [assets, setAssets] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [expandedBuildings, setExpandedBuildings] = useState({});
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -25,25 +27,30 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
 
   useEffect(() => {
     if (onRegisterExport) {
-      onRegisterExport(handleExportXLSX);
+      onRegisterExport((format) => {
+        if (format === 'pdf') handleExportPDF();
+        else handleExportXLSX();
+      });
     }
-  }, []);
+  });
 
   const loadMatrixData = async () => {
     setLoading(true);
     try {
-      const [bRes, cRes, eRes, sRes, lRes] = await Promise.all([
+      const [bRes, cRes, eRes, sRes, lRes, aRes] = await Promise.all([
         getBuildings().catch(() => []),
         getCategories().catch(() => []),
         getAllEquipments().catch(() => []),
         getAllSlots().catch(() => []),
-        getInventoryLogs().catch(() => [])
+        getInventoryLogs().catch(() => []),
+        getAssets('available').catch(() => [])
       ]);
       setBuildings(Array.isArray(bRes) ? bRes : []);
       setCategories(Array.isArray(cRes) ? cRes : []);
       setEquipments(Array.isArray(eRes) ? eRes : []);
       setSlots(Array.isArray(sRes) ? sRes : []);
       setLogs(Array.isArray(lRes) ? lRes : []);
+      setAssets(Array.isArray(aRes) ? aRes : []);
     } catch (err) {
       showToast('Gagal memuat data Dashboard Aset', 'error');
     } finally {
@@ -171,6 +178,45 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
 
   const grandTotal = Object.values(categoryTotals).reduce((a, b) => a + b, 0);
 
+  // --- Pivot Table Data Preparation ---
+  const buildingsMap = new Map();
+  filteredLocations.forEach(loc => {
+    if (!buildingsMap.has(loc.buildingName)) {
+      buildingsMap.set(loc.buildingName, {
+        name: loc.buildingName,
+        floors: [],
+        isOnlyBuilding: false
+      });
+    }
+    if (loc.floorName) {
+      buildingsMap.get(loc.buildingName).floors.push(loc);
+    } else {
+      buildingsMap.get(loc.buildingName).isOnlyBuilding = true;
+      buildingsMap.get(loc.buildingName).floors.push(loc);
+    }
+  });
+  const groupedBuildings = Array.from(buildingsMap.values());
+
+  const buildingMatrix = {};
+  groupedBuildings.forEach(bldg => {
+    buildingMatrix[bldg.name] = {};
+    displayCategories.forEach(cat => {
+      buildingMatrix[bldg.name][cat.id] = 0;
+      bldg.floors.forEach(floorLoc => {
+        buildingMatrix[bldg.name][cat.id] += (matrix[floorLoc.name]?.[cat.id] || 0);
+      });
+    });
+  });
+
+  const buildingTotals = {};
+  groupedBuildings.forEach(bldg => {
+    buildingTotals[bldg.name] = 0;
+    bldg.floors.forEach(floorLoc => {
+      buildingTotals[bldg.name] += (locationTotals[floorLoc.name] || 0);
+    });
+  });
+  // ------------------------------------
+
   // Top Location with most assets
   let topLocationName = '-';
   let maxCount = 0;
@@ -185,18 +231,12 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
   let lowestStockCategoryName = '-';
   let minStockCount = Infinity;
 
-  let brandMap = {};
-  try {
-    const saved = localStorage.getItem('spil_category_brands');
-    if (saved) brandMap = JSON.parse(saved);
-  } catch (e) {}
-
   displayCategories.forEach(cat => {
     let catStock = cat.initial_stock || 0;
-    const catBrands = brandMap[cat.name?.toLowerCase()] || brandMap[cat.id] || [];
-    if (catBrands.length > 0) {
-      catStock = catBrands.reduce((sum, b) => sum + (parseInt(b.stock) || 0), 0);
-    }
+    
+    // Add available assets for this category
+    const catAssets = assets.filter(a => String(a.category_id) === String(cat.id));
+    catStock += catAssets.length;
 
     if (catStock < minStockCount) {
       minStockCount = catStock;
@@ -262,8 +302,65 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
       XLSX.writeFile(workbook, `Dashboard_Aset_SpilDenah_${new Date().toISOString().slice(0,10)}.xlsx`);
       showToast('Dashboard Aset berhasil di-export ke format Excel (.xlsx)', 'success');
     } catch (err) {
-      console.error('XLSX Export Error:', err);
+      console.error(err);
       showToast('Gagal memuat export Excel', 'error');
+    }
+  };
+
+  const handleExportPDF = async () => {
+    try {
+      const { jsPDF } = await import('jspdf');
+      await import('jspdf-autotable');
+      
+      const doc = new jsPDF('landscape');
+      
+      doc.setFontSize(14);
+      doc.text('DASHBOARD ASET', 14, 15);
+      
+      const todayDate = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: '2-digit' });
+      doc.setFontSize(10);
+      doc.text(`Update: ${todayDate}`, 14, 22);
+
+      const headerRow = ['Jenis Aset', ...displayCategories.map(c => c.name), 'Total'];
+      
+      const bodyRows = [];
+      filteredLocations.forEach(loc => {
+        const row = [
+          loc.name,
+          ...displayCategories.map(cat => matrix[loc.name]?.[cat.id] || 0),
+          locationTotals[loc.name] || 0
+        ];
+        bodyRows.push(row);
+      });
+
+      const totalRow = [
+        'Total',
+        ...displayCategories.map(cat => categoryTotals[cat.id] || 0),
+        grandTotal
+      ];
+      bodyRows.push(totalRow);
+
+      doc.autoTable({
+        startY: 28,
+        head: [headerRow],
+        body: bodyRows,
+        theme: 'grid',
+        headStyles: { fillColor: [58, 149, 66] },
+        styles: { fontSize: 8, cellPadding: 2, halign: 'center' },
+        columnStyles: { 0: { halign: 'left' } }, // Jenis Aset left-aligned
+        didParseCell: function(data) {
+          if (data.row.index === bodyRows.length - 1) { // total row
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fillColor = [241, 245, 249];
+          }
+        }
+      });
+
+      doc.save(`dashboard_aset_${new Date().toISOString().slice(0,10)}.pdf`);
+      showToast('Dashboard Aset berhasil di-export ke PDF', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Gagal memuat export PDF', 'error');
     }
   };
 
@@ -390,48 +487,113 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
               </tr>
             </thead>
             <tbody>
-              {filteredLocations.length === 0 ? (
+              {groupedBuildings.length === 0 ? (
                 <tr>
                   <td colSpan={displayCategories.length + 2} style={{ padding: '30px', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
                     Tidak ada lokasi / area yang ditemukan.
                   </td>
                 </tr>
               ) : (
-                filteredLocations.map((loc, idx) => {
-                  const locTotal = locationTotals[loc.name] || 0;
+                groupedBuildings.map((bldg, idx) => {
+                  const bldgTotal = buildingTotals[bldg.name] || 0;
+                  const isExpanded = expandedBuildings[bldg.name];
+                  const hasRealFloors = bldg.floors.length > 0 && !bldg.isOnlyBuilding;
                   const isEven = idx % 2 === 0;
+                  
                   return (
-                    <tr key={loc.name} style={{ background: isEven ? '#FAFAFA' : '#FFFFFF', borderBottom: '1px solid #E2E8F0' }}>
-                      <td style={{
-                        padding: '11px 16px', fontWeight: '700', color: '#1E293B',
-                        borderRight: '2px solid #E2E8F0', whiteSpace: 'nowrap'
-                      }}>
-                        {loc.name}
-                      </td>
-
-                      {displayCategories.map(cat => {
-                        const count = matrix[loc.name]?.[cat.id] || 0;
+                    <React.Fragment key={bldg.name}>
+                      <tr 
+                        onClick={() => {
+                          if (hasRealFloors) {
+                            setExpandedBuildings(prev => ({
+                              ...prev,
+                              [bldg.name]: !prev[bldg.name]
+                            }));
+                          }
+                        }} 
+                        style={{ 
+                          background: isEven ? '#FAFAFA' : '#FFFFFF', 
+                          borderBottom: '1px solid #E2E8F0', 
+                          cursor: hasRealFloors ? 'pointer' : 'default' 
+                        }}
+                      >
+                        <td style={{
+                          padding: '11px 16px', fontWeight: '800', color: '#1E293B',
+                          borderRight: '2px solid #E2E8F0', whiteSpace: 'nowrap',
+                          display: 'flex', alignItems: 'center', gap: '8px'
+                        }}>
+                          {hasRealFloors ? (
+                            <span style={{ 
+                              display: 'inline-block',
+                              fontSize: '10px', 
+                              transition: 'transform 0.2s', 
+                              transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' 
+                            }}>
+                              ▶
+                            </span>
+                          ) : <span style={{ width: '10px' }}></span>}
+                          {bldg.name}
+                        </td>
+                        
+                        {displayCategories.map(cat => {
+                          const count = buildingMatrix[bldg.name]?.[cat.id] || 0;
+                          return (
+                            <td key={cat.id} style={{
+                              padding: '10px 12px', textAlign: 'center',
+                              fontWeight: count > 0 ? '800' : '500',
+                              color: count > 0 ? '#0F172A' : '#94A3B8',
+                              background: count > 0 ? 'rgba(58, 149, 66, 0.08)' : 'transparent',
+                              borderRight: '1px solid #F1F5F9'
+                            }}>
+                              {count}
+                            </td>
+                          );
+                        })}
+                        
+                        <td style={{
+                          padding: '10px 14px', textAlign: 'center', fontWeight: '800',
+                          color: 'var(--color-primary)', background: isEven ? '#F1F5F9' : '#F8FAFC',
+                          borderLeft: '2px solid #E2E8F0'
+                        }}>
+                          {bldgTotal}
+                        </td>
+                      </tr>
+                      
+                      {isExpanded && hasRealFloors && bldg.floors.map((floorLoc, fIdx) => {
+                        const locTotal = locationTotals[floorLoc.name] || 0;
                         return (
-                          <td key={cat.id} style={{
-                            padding: '10px 12px', textAlign: 'center',
-                            fontWeight: count > 0 ? '700' : '400',
-                            color: count > 0 ? '#0F172A' : '#94A3B8',
-                            background: count > 0 ? 'rgba(58, 149, 66, 0.06)' : 'transparent',
-                            borderRight: '1px solid #F1F5F9'
-                          }}>
-                            {count}
-                          </td>
+                          <tr key={floorLoc.name} style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                            <td style={{
+                              padding: '10px 16px 10px 36px', fontWeight: '600', color: '#475569',
+                              borderRight: '2px solid #E2E8F0', whiteSpace: 'nowrap', fontSize: '0.8rem',
+                              display: 'flex', alignItems: 'center'
+                            }}>
+                              <span style={{ width: '12px', height: '12px', borderLeft: '2px solid #CBD5E1', borderBottom: '2px solid #CBD5E1', marginRight: '8px', marginTop: '-12px' }}></span>
+                              {floorLoc.floorName || 'Tanpa Lantai'}
+                            </td>
+                            {displayCategories.map(cat => {
+                              const count = matrix[floorLoc.name]?.[cat.id] || 0;
+                              return (
+                                <td key={cat.id} style={{
+                                  padding: '8px 12px', textAlign: 'center',
+                                  fontWeight: count > 0 ? '600' : '400', fontSize: '0.8rem',
+                                  color: count > 0 ? '#334155' : '#94A3B8',
+                                  borderRight: '1px solid #F1F5F9'
+                                }}>
+                                  {count}
+                                </td>
+                              );
+                            })}
+                            <td style={{
+                              padding: '8px 14px', textAlign: 'center', fontWeight: '700', fontSize: '0.8rem',
+                              color: '#334155', borderLeft: '2px solid #E2E8F0'
+                            }}>
+                              {locTotal}
+                            </td>
+                          </tr>
                         );
                       })}
-
-                      <td style={{
-                        padding: '10px 14px', textAlign: 'center', fontWeight: '800',
-                        color: 'var(--color-primary)', background: isEven ? '#F1F5F9' : '#F8FAFC',
-                        borderLeft: '2px solid #E2E8F0'
-                      }}>
-                        {locTotal}
-                      </td>
-                    </tr>
+                    </React.Fragment>
                   );
                 })
               )}

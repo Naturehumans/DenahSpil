@@ -1,5 +1,5 @@
 import React from 'react';
-import { ZoomIn, ZoomOut, Maximize, Printer, Download } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize, Printer, Download, ClipboardList } from 'lucide-react';
 
 const CanvasControls = ({ 
   onZoomIn, onZoomOut, onResetZoom, onPrint, onExport,
@@ -171,6 +171,26 @@ const CanvasControls = ({
         title="Print Floor Plan"
       >
         <Printer size={20} />
+      </button>
+
+      <button 
+        className="neu-raised neu-action-btn"
+        onClick={() => window.dispatchEvent(new CustomEvent('toggle-right-sidebar'))}
+        style={{
+          background: 'var(--color-bg)',
+          color: 'var(--color-primary)',
+          border: 'none',
+          padding: '14px',
+          borderRadius: '50%',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginTop: '4px'
+        }}
+        title="Daftar Barang"
+      >
+        <ClipboardList size={20} />
       </button>
     </div>
   );

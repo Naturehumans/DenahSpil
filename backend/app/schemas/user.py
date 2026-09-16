@@ -15,6 +15,7 @@ class UserLogin(BaseModel):
 
 class UserResponse(UserBase):
     id: uuid.UUID
+    role: str
     is_active: bool
     created_at: datetime
     updated_at: datetime

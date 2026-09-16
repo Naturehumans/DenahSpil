@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShieldAlert, AlertTriangle } from 'lucide-react';
 import MainLayout from '../components/Layout/MainLayout';
@@ -10,7 +10,9 @@ import EquipmentForm from '../components/Forms/EquipmentForm';
 import InventoryManagement from '../components/Forms/InventoryManagement';
 import ConfirmModal from '../components/UI/ConfirmModal';
 import { useToast } from '../contexts/ToastContext';
+import { useAuth } from '../contexts/AuthContext';
 import Skeleton from '../components/UI/Skeleton';
+import Input from '../components/UI/Input';
 
 // API imports
 import { getBuildings, createBuilding, updateBuilding, deleteBuilding } from '../api/buildings';
@@ -32,9 +34,13 @@ import {
   deleteSlot, 
   assignItemToSlot, 
   moveItemBetweenSlots, 
-  unassignItemFromSlot 
+  unassignItemFromSlot,
+  replaceItemInSlot
 } from '../api/slots';
+import { getRoomPolygonsByFloor, createRoomPolygon, deleteRoomPolygon } from '../api/roomPolygons';
+import { getAssets } from '../api/inventory';
 import api from '../api/axios';
+import { getRoomNameFromCoordinates, isPointInPolygon } from '../utils/geometry';
 
 const DashboardPage = () => {
   const navigate = useNavigate();
@@ -49,31 +55,44 @@ const DashboardPage = () => {
   const [categories, setCategories] = useState([]);
   const [slots, setSlots] = useState([]);
   
+  const [unassignDate, setUnassignDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [activeModal, setActiveModal] = useState(null); // 'floor', 'category', 'equipment', 'equipment_detail', 'equipment_edit'
   const [inventoryInitialTab, setInventoryInitialTab] = useState('good');
   const [selectedEquipment, setSelectedEquipment] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [newEqPos, setNewEqPos] = useState({ x: 400, y: 300 });
   const [isEditMode, setIsEditMode] = useState(false);
+  const [roomPolygons, setRoomPolygons] = useState([]);
+  const [isDrawingPolygon, setIsDrawingPolygon] = useState(false);
+  const [currentPolygon, setCurrentPolygon] = useState([]);
+  const [confirmPolygonSave, setConfirmPolygonSave] = useState(null);
+  const [polygonName, setPolygonName] = useState('');
+  const [selectedRoomPolygonDetail, setSelectedRoomPolygonDetail] = useState(null);
   const [confirmDeleteEq, setConfirmDeleteEq] = useState(false);
-  const [confirmSlotDrop, setConfirmSlotDrop] = useState(null);
   const [confirmAssignItem, setConfirmAssignItem] = useState(null);
   const [highlightedSlotId, setHighlightedSlotId] = useState(null);
   const [warrantyConfirm, setWarrantyConfirm] = useState(null);
 
-  const [selectedCategoryId, setSelectedCategoryId] = useState(null);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
+  const [showFilters, setShowFilters] = useState(false);
   const [categoryBlockedNotice, setCategoryBlockedNotice] = useState(null);
   const [activeMobileSlotTemplate, setActiveMobileSlotTemplate] = useState(null);
+  const [pendingReplacement, setPendingReplacement] = useState(null);
+  const [pendingSlotMove, setPendingSlotMove] = useState(null);
+  const pendingActionRef = useRef(false);
   
   const { showToast } = useToast();
+  const { isAdmin } = useAuth();
 
   const fetchInitialData = async () => {
     try {
       setLoading(true);
-      const cats = await getCategories();
+      // Fetch categories and buildings concurrently
+      const [cats, bldgs] = await Promise.all([
+        getCategories(),
+        getBuildings()
+      ]);
       setCategories(cats);
-
-      const bldgs = await getBuildings();
       setBuildings(bldgs);
 
       if (bldgs.length > 0) {
@@ -92,11 +111,15 @@ const DashboardPage = () => {
           setCurrentFloor(activeFloor);
           localStorage.setItem('spil_active_floor_id', activeFloor.id);
           
-          const eqs = await getEquipmentsByFloor(activeFloor.id);
+          // Fetch equipments, slots, and room polygons concurrently
+          const [eqs, flrSlots, polys] = await Promise.all([
+            getEquipmentsByFloor(activeFloor.id),
+            getSlotsByFloor(activeFloor.id),
+            getRoomPolygonsByFloor(activeFloor.id).catch(() => [])
+          ]);
           setEquipments(eqs);
-          
-          const flrSlots = await getSlotsByFloor(activeFloor.id);
           setSlots(flrSlots);
+          setRoomPolygons(polys);
         }
       }
 
@@ -112,6 +135,18 @@ const DashboardPage = () => {
     fetchInitialData();
   }, [showToast]);
 
+  useEffect(() => {
+    if (pendingSlotMove) {
+      const targetSlot = slots.find(s => s.id === pendingSlotMove.targetSlotId);
+      const sourceSlot = slots.find(s => s.id === pendingSlotMove.sourceSlotId);
+      if (targetSlot && !targetSlot.equipment_id && !targetSlot.equipment && sourceSlot && pendingActionRef.current) {
+        pendingActionRef.current = false;
+        handleSlotMove(sourceSlot.id, targetSlot.position_x, targetSlot.position_y, true);
+        setPendingSlotMove(null);
+      }
+    }
+  }, [slots, pendingReplacement, pendingSlotMove]);
+
   const handleSelectFloor = async (floor) => {
     setCurrentFloor(floor);
     if (floor && floor.id) {
@@ -122,7 +157,9 @@ const DashboardPage = () => {
       setEquipments(eqs);
       const flrSlots = await getSlotsByFloor(floor.id);
       setSlots(flrSlots);
-      setSelectedCategoryId(null); // Reset category filter on floor change
+      const polys = await getRoomPolygonsByFloor(floor.id).catch(() => []);
+      setRoomPolygons(polys);
+      setSelectedCategoryIds([]); // Reset category filter on floor change
     } catch (error) {
       showToast('Gagal memuat data barang untuk lantai ini', 'error');
     }
@@ -146,7 +183,8 @@ const DashboardPage = () => {
         setCurrentFloor(null);
         setEquipments([]);
         setSlots([]);
-        setSelectedCategoryId(null);
+        setRoomPolygons([]);
+        setSelectedCategoryIds([]);
       }
     } catch (error) {
       showToast('Gagal memuat lantai area', 'error');
@@ -205,34 +243,69 @@ const DashboardPage = () => {
     // In edit mode, we use drag and drop now. Canvas clicks don't do anything by themselves.
   };
 
-  const handleSlotDrop = (categoryId, x, y) => {
+  const handleSlotDrop = async (categoryId, x, y) => {
     setActiveMobileSlotTemplate(null);
     const cat = categories.find(c => c.id === categoryId);
-    setConfirmSlotDrop({ category: cat, x, y, roomName: '' });
-  };
+    if (!cat || !currentFloor) return;
 
-  const confirmCreateSlot = async () => {
-    if (!currentFloor || !confirmSlotDrop) return;
+    const detectedRoom = getRoomNameFromCoordinates({x, y}, roomPolygons);
+    if (!detectedRoom) {
+      showToast('Ruangan belum terdefinisi', 'error');
+      return;
+    }
+
     try {
-      const roomName = (confirmSlotDrop.roomName || '').trim() || 'Ruang Utama';
       const newSlot = await createSlot(currentFloor.id, {
-        category_id: confirmSlotDrop.category.id,
-        position_x: confirmSlotDrop.x,
-        position_y: confirmSlotDrop.y,
-        room_name: roomName
+        category_id: categoryId,
+        position_x: x,
+        position_y: y,
+        room_name: detectedRoom
       });
-      newSlot.category = confirmSlotDrop.category; // optimistic
-      newSlot.room_name = roomName;
+      newSlot.category = cat; // optimistic
+      newSlot.room_name = detectedRoom;
       setSlots(prev => [...prev, newSlot]);
-      showToast(`Slot ${confirmSlotDrop.category.name} di ${roomName} berhasil ditempatkan`, 'success');
+      showToast(`Slot ${cat.name} berhasil ditempatkan di area ${detectedRoom}`, 'success');
     } catch (err) {
       showToast('Gagal membuat slot', 'error');
-    } finally {
-      setConfirmSlotDrop(null);
     }
   };
 
-  const handleItemDropOnSlot = async (categoryId, slotId) => {
+  const handlePolygonComplete = (coordinates) => {
+    setConfirmPolygonSave(coordinates);
+  };
+
+  const handleRoomPolygonClick = (polygon) => {
+    if (!polygon || !polygon.coordinates) return;
+    
+    // Find all slots physically located inside this polygon
+    const slotsInRoom = slots.filter(s => isPointInPolygon({ x: s.position_x, y: s.position_y }, polygon.coordinates));
+    const emptySlots = slotsInRoom.filter(s => !s.equipment && !s.equipment_id);
+    const filledSlots = slotsInRoom.filter(s => s.equipment || s.equipment_id);
+
+    setSelectedRoomPolygonDetail({
+      polygon,
+      slotsInRoom,
+      emptySlots,
+      filledSlots
+    });
+  };
+
+  const confirmSavePolygon = async (roomName) => {
+    try {
+      const polygonData = { name: roomName, coordinates: confirmPolygonSave };
+      const res = await createRoomPolygon(currentFloor.id, polygonData);
+      setRoomPolygons(prev => [...prev, res]);
+      showToast(`Area ${polygonData.name} berhasil disimpan`, 'success');
+      setCurrentPolygon([]);
+    } catch (err) {
+      showToast('Gagal menyimpan area ruangan', 'error');
+    }
+    setConfirmPolygonSave(null);
+    setPolygonName('');
+    setIsDrawingPolygon(false);
+  };
+
+  const handleItemDropOnSlot = async (categoryId, slotId, preselectedBrand = null, preselectedModel = null, preselectedAcType = null) => {
     if (!slotId) {
       showToast('Letakkan barang di atas slot yang sudah ada', 'warning');
       return;
@@ -246,52 +319,55 @@ const DashboardPage = () => {
 
     const cat = categories.find(c => c.id === categoryId);
     
-    // Fetch registered brands from localStorage or default mocks
-    let categoryBrands = [];
+    // Fetch available assets from inventory
+    let availableAssets = [];
     try {
-      const saved = localStorage.getItem('spil_category_brands');
-      if (saved) {
-        const map = JSON.parse(saved);
-        const key = (cat?.name || '').toLowerCase();
-        categoryBrands = map[key] || map[cat?.id] || [];
-      }
-    } catch (e) {}
-
-    // Fallback brand presets if none configured yet
-    if (!categoryBrands || categoryBrands.length === 0) {
-      const catNameLower = (cat?.name || '').toLowerCase();
-      if (catNameLower.includes('ac')) {
-        categoryBrands = [
-          { id: 'b1', brand: 'LG', model_number: 'Inverter 1PK' },
-          { id: 'b2', brand: 'Panasonic', model_number: 'Standard 2PK' },
-          { id: 'b3', brand: 'Daikin', model_number: 'Inverter 1.5PK' }
-        ];
-      } else if (catNameLower.includes('lampu')) {
-        categoryBrands = [
-          { id: 'b4', brand: 'Philips', model_number: 'LED 14W' },
-          { id: 'b5', brand: 'Hoppecke', model_number: 'Warm White 9W' }
-        ];
-      } else if (catNameLower.includes('kipas')) {
-        categoryBrands = [
-          { id: 'b6', brand: 'Miyako', model_number: 'Stand Fan 16"' },
-          { id: 'b7', brand: 'Sekai', model_number: 'Wall Fan 18"' }
-        ];
-      } else if (catNameLower.includes('proyektor')) {
-        categoryBrands = [
-          { id: 'b8', brand: 'Epson', model_number: 'EB-X500' },
-          { id: 'b9', brand: 'BenQ', model_number: 'MS550' }
-        ];
-      } else {
-        categoryBrands = [
-          { id: 'b10', brand: 'Standard', model_number: 'Model Regular' }
-        ];
-      }
+      availableAssets = await getAssets('available');
+    } catch (e) {
+      console.error("Failed to fetch available assets", e);
     }
+    
+    // Filter and group by brand & model for the specific category
+    const categoryAssets = availableAssets.filter(a => String(a.category_id) === String(categoryId));
+    const brandMap = {};
+    
+    categoryAssets.forEach(asset => {
+      const b = asset.brand || 'Lainnya';
+      const m = asset.model_number || 'Standard';
+      const key = `${b}|${m}`;
+      if (!brandMap[key]) {
+        brandMap[key] = { brand: b, model_number: m, stock: 0 };
+      }
+      brandMap[key].stock += 1;
+    });
+    
+    let categoryBrands = Object.values(brandMap);
 
-    const firstAvailableBrand = categoryBrands.find(b => b.stock === undefined || b.stock > 0);
-    const firstBrand = firstAvailableBrand?.brand || categoryBrands[0]?.brand || '';
-    const firstModel = firstAvailableBrand?.model_number || categoryBrands[0]?.model_number || '';
-    const isCustomDefault = !firstAvailableBrand && categoryBrands.length > 0;
+    const firstAvailableBrand = categoryBrands.length > 0 ? categoryBrands[0] : null;
+    const firstBrand = firstAvailableBrand?.brand || '';
+    const firstModel = firstAvailableBrand?.model_number || '';
+    const isCustomDefault = !firstAvailableBrand;
+
+    const isAC = (cat?.name || '').toUpperCase().includes('AC');
+    const isReplacement = !!(slot.equipment_id || slot.equipment);
+
+    if (preselectedBrand && (!isAC || preselectedAcType)) {
+      try {
+        // If quick-assigning, we can't easily select ID without UI, so we just pass empty string to let it fail or we should disable quick assign for AC if we require ID?
+        // Let's pass empty strings for now. If backend requires ID, it will fail.
+        const updatedSlot = await assignItemToSlot(slotId, preselectedBrand, preselectedModel, preselectedAcType, '', '');
+        setSlots(prev => prev.map(s => s.id === slotId ? updatedSlot : s));
+        if (cat) {
+          updateBrandStockOnAssign(cat, preselectedBrand, preselectedModel);
+        }
+        const cats = await getCategories();
+        setCategories(cats);
+        showToast(`Barang ${preselectedBrand} berhasil dipasang!`, 'success');
+      } catch (err) {
+        showToast(err.response?.data?.detail || 'Gagal menempatkan barang', 'error');
+      }
+      return;
+    }
 
     setConfirmAssignItem({
       slotId,
@@ -299,45 +375,22 @@ const DashboardPage = () => {
       category: cat,
       slot,
       categoryBrands,
+      categoryAssets,
       selectedBrand: firstBrand,
       selectedModel: firstModel,
       isCustom: isCustomDefault,
       customBrand: '',
-      customModel: ''
+      customModel: '',
+      acAssignType: isAC ? 'in_out' : undefined,
+      acInAssetId: '',
+      acOutAssetId: '',
+      isReplacement
     });
   };
 
   const updateBrandStockOnAssign = (category, brandName, modelNumber) => {
-    try {
-      const saved = localStorage.getItem('spil_category_brands');
-      const map = saved ? JSON.parse(saved) : {};
-      const catKey = (category?.name || '').toLowerCase();
-      const brands = map[catKey] || map[category?.id] || [];
-
-      let found = false;
-      const updatedBrands = brands.map(b => {
-        if ((b.brand || '').toLowerCase() === (brandName || '').toLowerCase() && (b.model_number || '').toLowerCase() === (modelNumber || '').toLowerCase()) {
-          found = true;
-          const currentStock = parseInt(b.stock) || 0;
-          return { ...b, stock: Math.max(0, currentStock - 1) };
-        }
-        return b;
-      });
-
-      if (!found && brandName) {
-        updatedBrands.push({
-          id: 'b_' + Date.now(),
-          brand: brandName,
-          model_number: modelNumber || '',
-          stock: 0,
-          min_stock: 1
-        });
-      }
-
-      map[catKey] = updatedBrands;
-      if (category?.id) map[category.id] = updatedBrands;
-      localStorage.setItem('spil_category_brands', JSON.stringify(map));
-    } catch (e) {}
+    // Backend now handles updating the AssetInventory status from 'available' to 'in_use' automatically
+    // during assignItemToSlot, so we don't need to manually update localStorage here.
   };
 
   const updateBrandStockOnUnassign = (category, brandName, modelNumber) => {
@@ -374,6 +427,9 @@ const DashboardPage = () => {
   };
 
   const saveToDamagedInventory = (category, equipment) => {
+    // If backend tracks it with AssetInventory (has_id), do not save to local storage to prevent duplicates
+    if (category?.has_id) return;
+    
     try {
       const stored = localStorage.getItem('spil_damaged_inventory');
       const items = stored ? JSON.parse(stored) : [];
@@ -398,7 +454,7 @@ const DashboardPage = () => {
   const confirmAssignEquipmentToSlot = async () => {
     if (!confirmAssignItem) return;
     try {
-      const { slotId, selectedBrand, selectedModel, isCustom, customBrand, customModel, category } = confirmAssignItem;
+      const { slotId, selectedBrand, selectedModel, isCustom, customBrand, customModel, category, acAssignType, acInAssetId, acOutAssetId } = confirmAssignItem;
       const finalBrand = isCustom ? customBrand.trim() : selectedBrand;
       const finalModel = isCustom ? customModel.trim() : selectedModel;
 
@@ -407,8 +463,39 @@ const DashboardPage = () => {
         return;
       }
 
-      const updatedSlot = await assignItemToSlot(slotId, finalBrand, finalModel);
+      if (!isCustom && acAssignType) {
+        if ((acAssignType === 'in' || acAssignType === 'in_out') && !acInAssetId) {
+          showToast('Silakan pilih ID Unit Dalam (IN)', 'warning');
+          return;
+        }
+        if ((acAssignType === 'out' || acAssignType === 'in_out') && !acOutAssetId) {
+          showToast('Silakan pilih ID Kompresor (OUT)', 'warning');
+          return;
+        }
+      }
+
+      if (confirmAssignItem.isReplacement) {
+        setPendingReplacement({
+          ...confirmAssignItem,
+          selectedBrand: finalBrand,
+          selectedModel: finalModel,
+        });
+        setActiveModal('unassign_destination');
+        setConfirmAssignItem(null);
+        return;
+      }
+
+      const updatedSlot = await assignItemToSlot(slotId, finalBrand, finalModel, acAssignType, acInAssetId, acOutAssetId);
       setSlots(prev => prev.map(s => s.id === slotId ? updatedSlot : s));
+      if (updatedSlot.equipment) {
+        setEquipments(prev => {
+          const exists = prev.find(e => e.id === updatedSlot.equipment.id);
+          if (exists) {
+            return prev.map(e => e.id === updatedSlot.equipment.id ? updatedSlot.equipment : e);
+          }
+          return [...prev, updatedSlot.equipment];
+        });
+      }
       
       // Reduce brand stock by 1
       if (category) {
@@ -486,24 +573,56 @@ const DashboardPage = () => {
   const handleUnassignItem = async (slotId, destination = null) => {
     try {
       const slotToUnassign = slots.find(s => s.id === slotId);
-      const eq = slotToUnassign?.equipment;
-      const cat = slotToUnassign?.category || categories.find(c => c.id === slotToUnassign?.category_id);
-
-      if (slotToUnassign && slotToUnassign.equipment_id) {
-        setEquipments(prev => prev.filter(e => e.id !== slotToUnassign.equipment_id));
-      }
-
-      await unassignItemFromSlot(slotId, destination);
-      setSlots(prev => prev.map(s => s.id === slotId ? { ...s, equipment_id: null, equipment: null } : s));
+      if (!slotToUnassign) return;
       
-      // If returned to "Masuk Inventori Baru (Stok Siap Pakai)", restore brand stock by 1
-      if (destination === 'good' && cat) {
-        updateBrandStockOnUnassign(cat, eq?.brand || slotToUnassign?.brand, eq?.model_number || slotToUnassign?.model_number);
+      const cat = categories.find(c => c.id === slotToUnassign.category_id);
+      const eq = slotToUnassign.equipment || (slotToUnassign.equipment_id ? equipments.find(e => e.id === slotToUnassign.equipment_id) : null);
+      
+      let formattedDate = null;
+      if (destination && unassignDate) {
+        // Create an ISO string keeping the time but using the selected date
+        const d = new Date(unassignDate);
+        d.setHours(new Date().getHours());
+        d.setMinutes(new Date().getMinutes());
+        formattedDate = d.toISOString();
       }
 
-      // If moved to "Masuk Inventori Rusak (Perbaikan)", save to spil_damaged_inventory
-      if (destination === 'damaged') {
-        saveToDamagedInventory(cat, eq || slotToUnassign);
+      if (pendingReplacement) {
+        const { selectedBrand, selectedModel, acAssignType, acInAssetId, acOutAssetId } = pendingReplacement;
+        const updatedSlot = await replaceItemInSlot(slotId, selectedBrand, selectedModel, acAssignType, destination, formattedDate, acInAssetId, acOutAssetId);
+        setSlots(prev => prev.map(s => s.id === slotId ? updatedSlot : s));
+        if (updatedSlot.equipment) {
+          setEquipments(prev => {
+            const exists = prev.find(e => e.id === updatedSlot.equipment.id);
+            if (exists) {
+              return prev.map(e => e.id === updatedSlot.equipment.id ? updatedSlot.equipment : e);
+            }
+            return [...prev, updatedSlot.equipment];
+          });
+        }
+        setPendingReplacement(null);
+        pendingActionRef.current = false;
+        
+        if (cat) {
+          updateBrandStockOnAssign(cat, selectedBrand, selectedModel);
+        }
+      } else {
+        if (slotToUnassign && slotToUnassign.equipment_id) {
+          setEquipments(prev => prev.filter(e => e.id !== slotToUnassign.equipment_id));
+        }
+
+        await unassignItemFromSlot(slotId, destination, formattedDate);
+        setSlots(prev => prev.map(s => s.id === slotId ? { ...s, equipment_id: null, equipment: null } : s));
+        
+        // If returned to "Masuk Inventori Baru (Stok Siap Pakai)", restore brand stock by 1
+        if (destination === 'good' && cat) {
+          updateBrandStockOnUnassign(cat, eq?.brand || slotToUnassign?.brand, eq?.model_number || slotToUnassign?.model_number);
+        }
+
+        // If moved to "Masuk Inventori Rusak (Perbaikan)", save to spil_damaged_inventory
+        if (destination === 'damaged') {
+          saveToDamagedInventory(cat, eq || slotToUnassign);
+        }
       }
 
       // refresh categories to update stock
@@ -512,6 +631,7 @@ const DashboardPage = () => {
       
       setActiveModal(null);
       setSelectedSlot(null);
+      setUnassignDate('');
       showToast(
         destination === 'good' 
           ? 'Barang dilepas & stok merk berhasil dikembalikan (+1)' 
@@ -523,32 +643,49 @@ const DashboardPage = () => {
     } catch (err) {
       console.error("Error unassigning item:", err);
       showToast(err.response?.data?.detail || err.message || 'Gagal menghapus barang', 'error');
+      setPendingReplacement(null);
+      setPendingSlotMove(null);
+      pendingActionRef.current = false;
     }
   };
 
   const handleUpdateEquipmentStatus = async (equipmentId, newStatus) => {
     try {
-      const updatedEq = await updateEquipment(equipmentId, { status: newStatus });
+      const responseEq = await updateEquipment(equipmentId, { status: newStatus });
+      const existingEq = equipments.find(e => e.id === equipmentId) || {};
+      const updatedEq = { ...existingEq, ...responseEq, category: existingEq.category || responseEq.category };
+      
       setEquipments(prev => prev.map(eq => eq.id === equipmentId ? updatedEq : eq));
-      if (selectedSlot) {
+      
+      const currentSlot = selectedSlot || slots.find(s => s.equipment_id === equipmentId);
+
+      if (currentSlot) {
         setSlots(prev => prev.map(s => s.equipment_id === equipmentId ? { ...s, equipment: updatedEq } : s));
       }
+      
       setSelectedEquipment(updatedEq);
       showToast('Kondisi barang berhasil diubah', 'success');
     } catch (err) {
-      showToast(err.response?.data?.detail || 'Gagal mengubah kondisi barang', 'error');
+      let errorMsg = 'Gagal mengubah kondisi barang';
+      const detail = err.response?.data?.detail;
+      if (typeof detail === 'string') errorMsg = detail;
+      else if (Array.isArray(detail)) errorMsg = detail[0]?.msg || JSON.stringify(detail);
+      
+      showToast(errorMsg, 'error');
     }
   };
 
-  const handleSlotMove = async (id, x, y, isFilled = false) => {
-    const sourceSlot = slots.find(s => s.id === id);
+  const handleSlotMove = async (id, x, y, isFilled = false, crossFloorSource = null) => {
+    let sourceSlot = slots.find(s => s.id === id);
+    if (!sourceSlot && crossFloorSource) {
+      sourceSlot = crossFloorSource;
+    }
     if (!sourceSlot) return;
 
     if (isFilled && (sourceSlot.equipment_id || sourceSlot.equipment)) {
-      // Find an EMPTY target slot of the SAME category near drop coordinates (within 60px)
+      // Find a target slot of the SAME category near drop coordinates (within 60px)
       const targetSlot = slots.find(s => 
         s.id !== id && 
-        s.equipment_id == null && 
         (String(s.category_id) === String(sourceSlot.category_id) || 
          String(s.category?.id) === String(sourceSlot.category_id) ||
          String(s.category_id) === String(sourceSlot.category?.id)) &&
@@ -556,6 +693,31 @@ const DashboardPage = () => {
       );
 
       if (targetSlot) {
+        if (targetSlot.equipment_id != null) {
+          // Target is FILLED! 
+          // We need to unassign targetSlot, then move sourceSlot to targetSlot.
+          setSelectedSlot(targetSlot);
+          pendingActionRef.current = true;
+          setPendingSlotMove({ sourceSlotId: sourceSlot.id, targetSlotId: targetSlot.id });
+          setActiveModal('unassign_destination');
+          return;
+        }
+
+        // Optimistic update
+        setSlots(prev => prev.map(s => {
+          if (s.id === targetSlot.id) {
+            return {
+              ...s,
+              equipment_id: sourceSlot.equipment_id,
+              equipment: sourceSlot.equipment
+            };
+          }
+          if (s.id === sourceSlot.id) {
+            return { ...s, equipment_id: null, equipment: null };
+          }
+          return s;
+        }));
+
         try {
           const updatedTargetSlot = await moveItemBetweenSlots(sourceSlot.id, targetSlot.id);
           
@@ -568,9 +730,6 @@ const DashboardPage = () => {
                 equipment: updatedTargetSlot.equipment || sourceSlot.equipment
               };
             }
-            if (s.id === sourceSlot.id) {
-              return { ...s, equipment_id: null, equipment: null };
-            }
             return s;
           }));
 
@@ -582,19 +741,33 @@ const DashboardPage = () => {
         } catch (err) {
           console.error("Error moving item between slots:", err);
           showToast(err.response?.data?.detail || 'Gagal memindahkan produk ke slot tujuan', 'error');
+          // Revert optimistic update
+          const cats = await getCategories();
+          setCategories(cats);
+          if (currentFloor) {
+            getSlotsByFloor(currentFloor.id).then(setSlots);
+          }
         }
+      } else {
+        // Target slot not found. Prevent moving the slot.
+        showToast('Unit harus ditempatkan di atas slot template yang sesuai.', 'error');
+        return;
       }
-      // If filled slot didn't hit a valid target slot, snap back
-      setSlots([...slots]);
     } else {
-      // Moving empty slot position on floorplan
+      // Optimistic update for moving empty slot position on floorplan
+      const sourceSlot = slots.find(s => s.id === id);
+      const detectedRoom = getRoomNameFromCoordinates({x, y}, roomPolygons);
+      const newRoomName = detectedRoom || (sourceSlot ? sourceSlot.room_name : '');
+      
+      setSlots(prev => prev.map(s => s.id === id ? { ...s, position_x: Math.round(x), position_y: Math.round(y), room_name: newRoomName } : s));
       try {
-        await updateSlotPosition(id, Math.round(x), Math.round(y));
-        setSlots(prev => prev.map(s => s.id === id ? { ...s, position_x: Math.round(x), position_y: Math.round(y) } : s));
-        showToast('Posisi slot berhasil diperbarui', 'success');
+        await updateSlotPosition(id, Math.round(x), Math.round(y), newRoomName);
+        showToast(detectedRoom ? `Posisi slot berhasil dipindah ke area ${detectedRoom}` : 'Posisi slot berhasil diperbarui', 'success');
       } catch (err) {
         console.error("Error updating slot position:", err);
+        // Revert optimistic update
         setSlots([...slots]);
+        showToast('Gagal memperbarui posisi slot', 'error');
       }
     }
   };
@@ -630,7 +803,11 @@ const DashboardPage = () => {
       showToast('Buat lantai terlebih dahulu', 'warning');
       return;
     }
-    setIsEditMode(!isEditMode);
+    const newEditMode = !isEditMode;
+    setIsEditMode(newEditMode);
+    if (newEditMode) {
+      setSelectedCategoryIds([]);
+    }
   };
 
   const handleManageHistory = () => {
@@ -655,9 +832,19 @@ const DashboardPage = () => {
     }
   };
 
-  const handleCloseModal = () => {
+  const handleCloseModal = async () => {
     setActiveModal(null);
     setSelectedSlot(null);
+    setUnassignDate('');
+    setPendingReplacement(null);
+    setPendingSlotMove(null);
+    pendingActionRef.current = false;
+    try {
+      const cats = await getCategories();
+      setCategories(cats);
+    } catch (error) {
+      console.error("Failed to refetch categories after closing modal", error);
+    }
   };
 
   // --- Area / Building Operations ---
@@ -683,6 +870,45 @@ const DashboardPage = () => {
       showToast('Gagal memperbarui area', 'error');
     }
   };
+
+  // Cross-floor drag-and-drop timer
+  useEffect(() => {
+    let hoverTimer = null;
+    let currentHoverFloorId = null;
+
+    const handleHoverStart = (e) => {
+      const targetFloorId = e.detail;
+      if (!targetFloorId || targetFloorId === currentHoverFloorId) return;
+      if (currentFloor && String(currentFloor.id) === String(targetFloorId)) return;
+
+      currentHoverFloorId = targetFloorId;
+      if (hoverTimer) clearTimeout(hoverTimer);
+
+      hoverTimer = setTimeout(() => {
+        const targetFloor = floors.find(f => String(f.id) === String(targetFloorId));
+        if (targetFloor) {
+          handleSelectFloor(targetFloor);
+        }
+      }, 800);
+    };
+
+    const handleHoverEnd = () => {
+      currentHoverFloorId = null;
+      if (hoverTimer) {
+        clearTimeout(hoverTimer);
+        hoverTimer = null;
+      }
+    };
+
+    window.addEventListener('konvaDragHoverFloor', handleHoverStart);
+    window.addEventListener('konvaDragHoverFloorEnd', handleHoverEnd);
+
+    return () => {
+      window.removeEventListener('konvaDragHoverFloor', handleHoverStart);
+      window.removeEventListener('konvaDragHoverFloorEnd', handleHoverEnd);
+      if (hoverTimer) clearTimeout(hoverTimer);
+    };
+  }, [floors, currentFloor]);
 
   const handleDeleteBuilding = async (id) => {
     try {
@@ -895,7 +1121,16 @@ const DashboardPage = () => {
     if (!selectedEquipment) return;
     try {
       const cat = categories.find(c => c.id === selectedEquipment.category_id);
-      await deleteEquipment(selectedEquipment.id, destination);
+      
+      let formattedDate = null;
+      if (destination && unassignDate) {
+        const d = new Date(unassignDate);
+        d.setHours(new Date().getHours());
+        d.setMinutes(new Date().getMinutes());
+        formattedDate = d.toISOString();
+      }
+
+      await deleteEquipment(selectedEquipment.id, destination, formattedDate);
       setEquipments(equipments.filter(eq => eq.id !== selectedEquipment.id));
       
       if (destination === 'good' && cat) {
@@ -942,24 +1177,25 @@ const DashboardPage = () => {
     : (currentFloor ? "https://images.unsplash.com/photo-1600607686527-6fb886090705?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80" : "");
 
   // Filter equipments & slots for Canvas based on selected category
-  const canvasEquipments = selectedCategoryId 
-    ? equipments.filter(eq => String(eq.category_id || eq.category?.id) === String(selectedCategoryId))
+  const canvasEquipments = selectedCategoryIds.length > 0
+    ? equipments.filter(eq => selectedCategoryIds.map(String).includes(String(eq.category_id || eq.category?.id)))
     : equipments;
 
-  const canvasSlots = selectedCategoryId
-    ? slots.filter(slot => String(slot.category_id || slot.category?.id) === String(selectedCategoryId))
+  const canvasSlots = selectedCategoryIds.length > 0
+    ? slots.filter(slot => selectedCategoryIds.map(String).includes(String(slot.category_id || slot.category?.id)))
     : slots;
 
-  const selectedCategoryObj = categories.find(c => String(c.id) === String(selectedCategoryId));
+  const selectedCategoryObj = selectedCategoryIds.length === 1 ? categories.find(c => String(c.id) === String(selectedCategoryIds[0])) : null;
 
   return (
     <MainLayout
-      onManageFloors={handleManageFloors}
-      onManageCategories={handleManageCategories}
-      onManageEquipments={handleManageEquipments}
+      onManageFloors={isAdmin ? handleManageFloors : undefined}
+      onManageCategories={isAdmin ? handleManageCategories : undefined}
+      onManageEquipments={isAdmin ? handleManageEquipments : undefined}
       onManageHistory={handleManageHistory}
       onManageInventory={() => navigate('/inventory')}
       onExport={handleExport}
+      isAdmin={isAdmin}
       // Pass states to layout
       buildings={buildings}
       currentBuilding={currentBuilding}
@@ -974,8 +1210,21 @@ const DashboardPage = () => {
       onEquipmentDoubleClick={handleEquipmentDoubleClick}
       highlightedSlotId={highlightedSlotId}
       isEditMode={isEditMode}
-      selectedCategoryId={selectedCategoryId}
-      onSelectCategory={setSelectedCategoryId}
+      isDrawingPolygon={isDrawingPolygon}
+      setIsDrawingPolygon={setIsDrawingPolygon}
+      currentPolygon={currentPolygon}
+      setCurrentPolygon={setCurrentPolygon}
+      onPolygonComplete={handlePolygonComplete}
+      selectedCategoryIds={selectedCategoryIds}
+      onSelectCategory={(id) => {
+        if (id === null) {
+          setSelectedCategoryIds([]);
+        } else {
+          setSelectedCategoryIds(prev => 
+            prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
+          );
+        }
+      }}
       slots={slots}
       onDeleteSlot={handleDeleteSlot}
       onSelectMobileSlotTemplate={(cat) => {
@@ -1006,48 +1255,107 @@ const DashboardPage = () => {
         </div>
       )}
 
-      {selectedCategoryObj && (
-        <div style={{
-          position: 'absolute',
-          top: '24px',
-          left: '24px',
-          background: '#ffffff',
-          border: `2px solid ${selectedCategoryObj.color || 'var(--color-primary)'}`,
-          padding: '8px 16px',
-          borderRadius: '20px',
-          fontWeight: '700',
-          fontSize: '0.875rem',
-          color: '#0f172a',
-          boxShadow: '0 4px 14px rgba(0,0,0,0.1)',
-          zIndex: 15,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}>
-          <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: selectedCategoryObj.color || 'var(--color-primary)' }} />
-          <span>Kategori: {selectedCategoryObj.name} ({canvasSlots.length} item)</span>
-          <button 
-            onClick={() => setSelectedCategoryId(null)}
-            style={{
-              background: 'rgba(0,0,0,0.06)',
-              border: 'none',
-              borderRadius: '50%',
-              width: '20px',
-              height: '20px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 'bold',
-              fontSize: '0.75rem',
-              color: '#64748b'
-            }}
-            title="Tampilkan Semua Kategori"
-          >
-            ✕
-          </button>
-        </div>
-      )}
+      {/* Visibility Controls Toggle Button & Panel */}
+      <div style={{
+        position: 'absolute',
+        top: '24px',
+        left: '24px',
+        zIndex: 20
+      }}>
+        <button 
+          onClick={() => setShowFilters(!showFilters)}
+          className={showFilters ? "neu-inset" : "neu-raised-sm"}
+          style={{ 
+            padding: '10px 16px', fontSize: '0.875rem', fontWeight: 'bold', 
+            color: 'var(--color-text-primary)', borderRadius: '24px', border: 'none', 
+            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+          }}
+          title="Filter Kategori Barang"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          Filter Barang
+          <span style={{ 
+            background: selectedCategoryIds.length === 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)', 
+            color: 'white', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' 
+          }}>
+            {selectedCategoryIds.length === 1 && selectedCategoryIds[0] === 'none' ? '0' : (selectedCategoryIds.length === 0 ? 'Semua' : selectedCategoryIds.length)}
+          </span>
+        </button>
+
+        {showFilters && (
+          <div className="neu-raised" style={{
+            position: 'absolute',
+            top: '52px',
+            left: '0',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            padding: '16px',
+            borderRadius: '16px',
+            background: 'var(--color-bg)',
+            width: 'max-content',
+            maxWidth: '320px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.15)'
+          }}>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button 
+                onClick={() => setSelectedCategoryIds([])}
+                className={selectedCategoryIds.length === 0 ? "neu-inset" : "neu-raised-sm"}
+                style={{ flex: 1, padding: '8px 16px', fontSize: '0.85rem', fontWeight: '600', color: selectedCategoryIds.length === 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)', borderRadius: '24px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                Select All
+              </button>
+              <button 
+                onClick={() => setSelectedCategoryIds(['none'])}
+                className={selectedCategoryIds.length === 1 && selectedCategoryIds[0] === 'none' ? "neu-inset" : "neu-raised-sm"}
+                style={{ flex: 1, padding: '8px 16px', fontSize: '0.85rem', fontWeight: '600', color: selectedCategoryIds.length === 1 && selectedCategoryIds[0] === 'none' ? 'var(--color-danger)' : 'var(--color-text-secondary)', borderRadius: '24px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
+                Remove All
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {categories.map(cat => {
+                const isActive = selectedCategoryIds.length === 0 || (!selectedCategoryIds.includes('none') && selectedCategoryIds.includes(cat.id));
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => {
+                      if (selectedCategoryIds.length === 0) {
+                        setSelectedCategoryIds(categories.map(c => c.id).filter(id => id !== cat.id));
+                      } else if (selectedCategoryIds.length === 1 && selectedCategoryIds[0] === 'none') {
+                        setSelectedCategoryIds([cat.id]);
+                      } else {
+                        setSelectedCategoryIds(prev => {
+                          if (prev.includes(cat.id)) {
+                            const next = prev.filter(id => id !== cat.id);
+                            return next.length === 0 ? ['none'] : next;
+                          } else {
+                            const next = [...prev, cat.id];
+                            return next.length === categories.length ? [] : next;
+                          }
+                        });
+                      }
+                    }}
+                    className={isActive ? "neu-inset" : "neu-raised-sm"}
+                    style={{ 
+                      padding: '6px 12px', fontSize: '0.8rem', fontWeight: '600', 
+                      color: isActive ? 'var(--color-primary)' : 'var(--color-text-secondary)', 
+                      borderRadius: '16px', border: 'none', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: '6px'
+                    }}
+                  >
+                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: cat.color || 'var(--color-primary)', opacity: isActive ? 1 : 0.4 }} />
+                    {cat.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
 
       <FloorCanvas 
         imageUrl={currentImageUrl}
@@ -1066,93 +1374,24 @@ const DashboardPage = () => {
         onExport={handleExport}
         activeMobileSlotTemplate={activeMobileSlotTemplate}
         onCancelMobilePlacement={() => setActiveMobileSlotTemplate(null)}
+        roomPolygons={roomPolygons}
+        isDrawingPolygon={isDrawingPolygon}
+        currentPolygon={currentPolygon}
+        setCurrentPolygon={setCurrentPolygon}
+        onPolygonComplete={handlePolygonComplete}
+        onPolygonClick={handleRoomPolygonClick}
+        onPolygonDelete={async (polygonId) => {
+          try {
+            await deleteRoomPolygon(polygonId);
+            setRoomPolygons(prev => prev.filter(p => p.id !== polygonId));
+            showToast('Area ruangan dihapus', 'success');
+          } catch (err) {
+            showToast('Gagal menghapus area ruangan', 'error');
+          }
+        }}
       />
 
-      <Modal 
-        isOpen={!!confirmSlotDrop} 
-        onClose={() => setConfirmSlotDrop(null)} 
-        title="Penempatan Slot Template"
-        maxWidth="460px"
-      >
-        {confirmSlotDrop && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '4px 0' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ 
-                width: '40px', height: '40px', borderRadius: '50%', 
-                background: confirmSlotDrop.category?.color || 'var(--color-primary)', 
-                color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontWeight: 'bold', fontSize: '1.1rem'
-              }}>
-                {(confirmSlotDrop.category?.name || 'S').charAt(0).toUpperCase()}
-              </div>
-              <div>
-                <h4 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--color-text-primary)' }}>
-                  Slot Kategori: {confirmSlotDrop.category?.name}
-                </h4>
-                <p style={{ margin: '2px 0 0', fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
-                  Gedung: {currentBuilding?.name || '-'} | {currentFloor?.name || '-'}
-                </p>
-              </div>
-            </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text-primary)' }}>
-                Lokasi Ruangan / Room Name *
-              </label>
-              <input 
-                type="text"
-                placeholder="Contoh: Ruang Meeting A, Kamar Utama, Lobby, Gudang..."
-                value={confirmSlotDrop.roomName || ''}
-                onChange={(e) => setConfirmSlotDrop({ ...confirmSlotDrop, roomName: e.target.value })}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    confirmCreateSlot();
-                  }
-                }}
-                style={{ 
-                  width: '100%', 
-                  padding: '10px 14px', 
-                  borderRadius: '10px', 
-                  border: '1px solid var(--color-border)', 
-                  outline: 'none',
-                  fontSize: '0.875rem',
-                  color: 'var(--color-text-primary)',
-                  background: 'var(--color-bg)'
-                }}
-                autoFocus
-              />
-              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                Nama ruangan ini akan tercantum di Detail Barang & Log History.
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px' }}>
-              <button 
-                onClick={() => setConfirmSlotDrop(null)}
-                style={{ 
-                  padding: '8px 16px', borderRadius: '8px', border: 'none', 
-                  background: 'transparent', color: 'var(--color-text-secondary)', 
-                  cursor: 'pointer', fontWeight: '500', fontSize: '0.875rem' 
-                }}
-              >
-                Batal
-              </button>
-              <button 
-                onClick={confirmCreateSlot}
-                style={{ 
-                  padding: '8px 20px', borderRadius: '8px', border: 'none', 
-                  background: 'var(--color-primary)', color: 'white', 
-                  cursor: 'pointer', fontWeight: '600', fontSize: '0.875rem',
-                  boxShadow: '0 4px 12px rgba(58, 149, 66, 0.3)'
-                }}
-              >
-                Tempatkan Slot
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
 
       <Modal 
         isOpen={!!confirmAssignItem} 
@@ -1189,91 +1428,148 @@ const DashboardPage = () => {
                 Pilih Merk / Tipe Terdaftar:
               </label>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', overflowY: 'auto' }}>
-                {confirmAssignItem.categoryBrands.map((bItem, idx) => {
-                  const isSelected = !confirmAssignItem.isCustom && 
-                    confirmAssignItem.selectedBrand === bItem.brand && 
-                    confirmAssignItem.selectedModel === bItem.model_number;
-
-                  const isOutOfStock = bItem.stock === 0;
-
-                  return (
-                    <div 
-                      key={idx}
-                      onClick={() => {
-                        if (!isOutOfStock) {
-                          setConfirmAssignItem({
-                            ...confirmAssignItem,
-                            isCustom: false,
-                            selectedBrand: bItem.brand,
-                            selectedModel: bItem.model_number || ''
-                          });
-                        }
-                      }}
-                      style={{ 
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        padding: '10px 14px', borderRadius: '10px',
-                        border: isSelected ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
-                        background: isSelected ? 'rgba(58, 149, 66, 0.08)' : (isOutOfStock ? '#f3f4f6' : 'var(--color-bg)'),
-                        cursor: isOutOfStock ? 'not-allowed' : 'pointer', 
-                        transition: 'all 0.2s ease',
-                        opacity: isOutOfStock ? 0.6 : 1
-                      }}
+              <div style={{ display: 'flex', gap: '10px', flexDirection: 'column' }}>
+                {confirmAssignItem.categoryBrands.length === 0 && (
+                  <div style={{ padding: '12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#991b1b', fontSize: '0.875rem', lineHeight: '1.4' }}>
+                    <AlertTriangle size={16} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle', marginTop: '-2px' }} />
+                    <strong>Stok Barang Kosong!</strong> Tidak ada barang "{confirmAssignItem.category?.name}" yang "Siap Pakai" di inventori saat ini. Anda dapat memasukkan merk/tipe manual di bawah ini, atau membatalkan dan menambah stok di menu Inventori terlebih dahulu.
+                  </div>
+                )}
+                
+                { (confirmAssignItem.category?.name || '').toUpperCase().includes('AC') && (
+                  <div style={{ marginTop: '4px' }}>
+                    <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text-primary)', marginBottom: '8px' }}>
+                      Bagian AC yang dipasang
+                    </label>
+                    <select
+                      value={confirmAssignItem.acAssignType || 'in_out'}
+                      onChange={(e) => setConfirmAssignItem({ ...confirmAssignItem, acAssignType: e.target.value })}
+                      style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '1rem', outline: 'none', background: 'var(--color-bg)', color: 'var(--color-text)' }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <input 
-                          type="radio" 
-                          checked={isSelected}
-                          disabled={isOutOfStock}
-                          onChange={() => {}}
-                          style={{ accentColor: 'var(--color-primary)', cursor: isOutOfStock ? 'not-allowed' : 'pointer' }}
-                        />
-                        <div>
-                          <strong style={{ fontSize: '0.9rem', color: 'var(--color-text-primary)' }}>
-                            {bItem.brand}
-                          </strong>
-                          {bItem.model_number && (
-                            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginLeft: '8px' }}>
-                              ({bItem.model_number})
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      {bItem.stock !== undefined && (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', background: 'var(--color-bg-secondary)', padding: '2px 8px', borderRadius: '12px' }}>
-                          Stok: {bItem.stock}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
+                      <option value="in_out">Keduanya (Unit Dalam & Kompresor)</option>
+                      <option value="in">Hanya Unit Dalam (IN)</option>
+                      <option value="out">Hanya Kompresor (OUT)</option>
+                    </select>
+                  </div>
+                )}
 
-                {/* Option Custom */}
-                <div 
-                  onClick={() => setConfirmAssignItem({ ...confirmAssignItem, isCustom: true })}
-                  style={{ 
-                    display: 'flex', alignItems: 'center', gap: '10px',
-                    padding: '10px 14px', borderRadius: '10px',
-                    border: confirmAssignItem.isCustom ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
-                    background: confirmAssignItem.isCustom ? 'rgba(58, 149, 66, 0.08)' : 'var(--color-bg)',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <input 
-                    type="radio" 
-                    checked={confirmAssignItem.isCustom}
-                    onChange={() => {}}
-                    style={{ accentColor: 'var(--color-primary)' }}
-                  />
-                  <span style={{ fontSize: '0.9rem', fontWeight: '500', color: 'var(--color-text-primary)' }}>
-                    + Input Merk & Tipe Manual / Lainnya
-                  </span>
-                </div>
+                {confirmAssignItem.categoryBrands.length > 0 && (
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
+                        Merk
+                      </label>
+                      <select 
+                        value={confirmAssignItem.isCustom ? 'custom' : confirmAssignItem.selectedBrand}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === 'custom') {
+                            setConfirmAssignItem({ ...confirmAssignItem, isCustom: true });
+                          } else {
+                            const models = confirmAssignItem.categoryBrands.filter(b => b.brand === val);
+                            const firstModel = models.length > 0 ? models[0].model_number : '';
+                            setConfirmAssignItem({ ...confirmAssignItem, isCustom: false, selectedBrand: val, selectedModel: firstModel });
+                          }
+                        }}
+                        className="neu-inset"
+                        style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.875rem', outline: 'none' }}
+                      >
+                        {Array.from(new Set(confirmAssignItem.categoryBrands.map(b => b.brand))).map((brand, idx) => (
+                          <option key={idx} value={brand}>{brand}</option>
+                        ))}
+                        <option value="custom">+ Input Merk/Tipe Manual</option>
+                      </select>
+                    </div>
+                    
+                    {!confirmAssignItem.isCustom && (
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
+                          Kode Barang (Tipe)
+                        </label>
+                        <select 
+                          value={confirmAssignItem.selectedModel}
+                          onChange={(e) => setConfirmAssignItem({ ...confirmAssignItem, selectedModel: e.target.value })}
+                          className="neu-inset"
+                          style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.875rem', outline: 'none' }}
+                        >
+                          {confirmAssignItem.categoryBrands.filter(b => b.brand === confirmAssignItem.selectedBrand).map((b, idx) => (
+                            <option key={idx} value={b.model_number} disabled={b.stock === 0}>
+                              {b.model_number || 'Standard'} {b.stock !== undefined ? `(Stok: ${b.stock})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {confirmAssignItem.acAssignType && !confirmAssignItem.isCustom && (
+                  <div style={{ marginTop: '16px' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
+                      Tipe Pemasangan / Penggantian AC
+                    </label>
+                    <select 
+                      value={confirmAssignItem.acAssignType}
+                      onChange={(e) => setConfirmAssignItem({ ...confirmAssignItem, acAssignType: e.target.value, acInAssetId: '', acOutAssetId: '' })}
+                      className="neu-inset"
+                      style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.875rem', outline: 'none' }}
+                    >
+                      <option value="in_out">Keduanya (IN & OUT)</option>
+                      <option value="in">Hanya Unit Dalam (IN)</option>
+                      <option value="out">Hanya Kompresor (OUT)</option>
+                    </select>
+                  </div>
+                )}
+                
+                {confirmAssignItem.acAssignType && !confirmAssignItem.isCustom && (
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                    {(confirmAssignItem.acAssignType === 'in' || confirmAssignItem.acAssignType === 'in_out') && (
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
+                          ID Unit Dalam (IN) *
+                        </label>
+                        <select 
+                          value={confirmAssignItem.acInAssetId || ''}
+                          onChange={(e) => setConfirmAssignItem({ ...confirmAssignItem, acInAssetId: e.target.value })}
+                          className="neu-inset"
+                          style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.875rem', outline: 'none' }}
+                        >
+                          <option value="">-- Pilih ID Unit IN --</option>
+                          {confirmAssignItem.categoryAssets
+                            .filter(a => a.brand === confirmAssignItem.selectedBrand && a.model_number === confirmAssignItem.selectedModel && a.ac_type === 'in' && a.status === 'available')
+                            .map((a, idx) => (
+                              <option key={idx} value={a.asset_id}>{a.asset_id}</option>
+                            ))}
+                        </select>
+                      </div>
+                    )}
+                    {(confirmAssignItem.acAssignType === 'out' || confirmAssignItem.acAssignType === 'in_out') && (
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
+                          ID Kompresor (OUT) *
+                        </label>
+                        <select 
+                          value={confirmAssignItem.acOutAssetId || ''}
+                          onChange={(e) => setConfirmAssignItem({ ...confirmAssignItem, acOutAssetId: e.target.value })}
+                          className="neu-inset"
+                          style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.875rem', outline: 'none' }}
+                        >
+                          <option value="">-- Pilih ID Unit OUT --</option>
+                          {confirmAssignItem.categoryAssets
+                            .filter(a => a.brand === confirmAssignItem.selectedBrand && a.model_number === confirmAssignItem.selectedModel && a.ac_type === 'out' && a.status === 'available')
+                            .map((a, idx) => (
+                              <option key={idx} value={a.asset_id}>{a.asset_id}</option>
+                            ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
             {confirmAssignItem.isCustom && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', background: 'var(--color-bg-secondary)', padding: '12px', borderRadius: '10px' }}>
+              <div className="mobile-grid-1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', background: 'var(--color-bg-secondary)', padding: '12px', borderRadius: '10px' }}>
                 <div>
                   <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)' }}>
                     Nama Merk *
@@ -1393,6 +1689,40 @@ const DashboardPage = () => {
           const slotCode = slot?.slot_code || selectedEquipment?.slot_code;
           const catColor = slot?.category?.color || selectedEquipment.category?.color || '#3b82f6';
           const catName = slot?.category?.name || selectedEquipment.category?.name;
+          
+          let purchaseDateStr = '-';
+          let expiredDateStr = '-';
+          try {
+            const savedBrands = localStorage.getItem('spil_category_brands');
+            if (savedBrands) {
+              const map = JSON.parse(savedBrands);
+              const catKey = (catName || '').toLowerCase();
+              const catBrands = map[catKey] || map[selectedEquipment.category_id] || [];
+              const brandObj = catBrands.find(b => 
+                (b.brand || '').toLowerCase() === (selectedEquipment.brand || '').toLowerCase() &&
+                (b.model_number || '').toLowerCase() === (selectedEquipment.model_number || '').toLowerCase()
+              );
+              if (brandObj) {
+                if (brandObj.purchase_date) {
+                  const d = new Date(brandObj.purchase_date);
+                  if (!isNaN(d)) {
+                    purchaseDateStr = d.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                  } else {
+                    purchaseDateStr = brandObj.purchase_date;
+                  }
+                }
+                if (brandObj.expired_date) {
+                  const ed = new Date(brandObj.expired_date);
+                  if (!isNaN(ed)) {
+                    expiredDateStr = ed.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                  } else {
+                    expiredDateStr = brandObj.expired_date;
+                  }
+                }
+              }
+            }
+          } catch(e) {}
+
           return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', padding: '6px 0' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 16px', background: 'rgba(255,255,255,0.6)', borderRadius: '12px', border: '1px solid rgba(0,0,0,0.05)' }}>
@@ -1428,7 +1758,7 @@ const DashboardPage = () => {
               </div>
             </div>
             
-            <div className="neu-inset" style={{ padding: '18px', borderRadius: '14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div className="neu-inset mobile-grid-1" style={{ padding: '18px', borderRadius: '14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
               <div style={{ background: 'rgba(255, 255, 255, 0.5)', padding: '12px 14px', borderRadius: '10px' }}>
                 <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.5px' }}>
                   ID TEMPAT (SLOT)
@@ -1442,9 +1772,23 @@ const DashboardPage = () => {
                 <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.5px' }}>
                   ID BARANG (ASET)
                 </p>
-                <p style={{ margin: '6px 0 0', fontWeight: '800', color: '#2563eb', fontSize: '1.05rem' }}>
+                <div style={{ margin: '6px 0 0', fontWeight: '800', color: '#2563eb', fontSize: '1.05rem' }}>
                   {selectedEquipment.name}
-                </p>
+                  {(selectedEquipment.ac_in_asset_id || selectedEquipment.ac_out_asset_id) && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px', fontSize: '0.85rem' }}>
+                      {selectedEquipment.ac_in_asset_id && (
+                        <div style={{ background: 'rgba(37,99,235,0.1)', padding: '2px 8px', borderRadius: '4px', display: 'inline-block' }}>
+                          IN: {selectedEquipment.ac_in_asset_id}
+                        </div>
+                      )}
+                      {selectedEquipment.ac_out_asset_id && (
+                        <div style={{ background: 'rgba(37,99,235,0.1)', padding: '2px 8px', borderRadius: '4px', display: 'inline-block' }}>
+                          OUT: {selectedEquipment.ac_out_asset_id}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div style={{ background: 'rgba(255, 255, 255, 0.5)', padding: '12px 14px', borderRadius: '10px' }}>
@@ -1465,7 +1809,16 @@ const DashboardPage = () => {
                 </p>
               </div>
 
-              <div style={{ background: 'rgba(255, 255, 255, 0.5)', padding: '12px 14px', borderRadius: '10px', gridColumn: '1 / -1' }}>
+              <div style={{ background: 'rgba(255, 255, 255, 0.5)', padding: '12px 14px', borderRadius: '10px' }}>
+                <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.5px' }}>
+                  TANGGAL PEMBELIAN
+                </p>
+                <p style={{ margin: '6px 0 0', fontWeight: '700', color: 'var(--color-text-primary)', fontSize: '0.95rem' }}>
+                  {purchaseDateStr}
+                </p>
+              </div>
+
+              <div style={{ background: 'rgba(255, 255, 255, 0.5)', padding: '12px 14px', borderRadius: '10px' }}>
                 <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.5px' }}>
                   LOKASI & AREA DENAH
                 </p>
@@ -1473,14 +1826,25 @@ const DashboardPage = () => {
                   {currentBuilding?.name || 'Gedung Utama'} — {currentFloor?.name || 'Lantai 1'}
                 </p>
               </div>
+
+              {expiredDateStr !== '-' && (
+                <div style={{ background: 'rgba(255, 255, 255, 0.5)', padding: '12px 14px', borderRadius: '10px' }}>
+                  <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase', fontWeight: '700', letterSpacing: '0.5px' }}>
+                    TANGGAL KEDALUWARSA
+                  </p>
+                  <p style={{ margin: '6px 0 0', fontWeight: '700', color: 'var(--color-danger)', fontSize: '0.95rem' }}>
+                    {expiredDateStr}
+                  </p>
+                </div>
+              )}
             </div>
             
             
-            {/* KONDISI ASET - KHUSUS PERMANENT (BER-ID) */}
-            {(selectedSlot?.category?.has_id || selectedEquipment?.category?.has_id || categories.find(c => c.id === selectedEquipment?.category_id)?.has_id) && (
+            {/* KONDISI ASET - ADMIN ONLY */}
+            {isAdmin && (selectedSlot?.category?.has_id || selectedEquipment?.category?.has_id || categories.find(c => c.id === selectedEquipment?.category_id)?.has_id) && (
               <div className="neu-inset" style={{ padding: '16px', borderRadius: '12px', marginTop: '16px' }}>
                 <p style={{ margin: '0 0 12px', fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text)' }}>Kondisi Aset</p>
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div className="mobile-col" style={{ display: 'flex', gap: '8px' }}>
                   <button 
                     onClick={() => handleUpdateEquipmentStatus(selectedEquipment.id, 'active')}
                     className="neu-raised-sm"
@@ -1530,7 +1894,7 @@ const DashboardPage = () => {
             )}
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px' }}>
-              {isEditMode ? (
+              {isAdmin && isEditMode ? (
                 <button 
                   onClick={() => {
                     if (selectedSlot) {
@@ -1557,22 +1921,122 @@ const DashboardPage = () => {
         );})()}
       </Modal>
 
-
-
       <Modal 
         isOpen={activeModal === 'unassign_destination' || activeModal === 'delete_equipment_destination'} 
         onClose={() => setActiveModal('equipment_detail')} 
         title="Status & Tujuan Pelepasan Barang"
       >
         <div style={{ padding: '8px' }}>
-          <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem', marginBottom: '20px' }}>
+          <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem', marginBottom: '12px' }}>
             Kemana Anda ingin memindahkan barang ini dari template denah? Status akan langsung terhubung ke <strong>History Log</strong>.
           </p>
+
+          {(pendingReplacement || pendingSlotMove) && (() => {
+            const outgoingItem = selectedSlot?.equipment || selectedEquipment || pendingReplacement?.slot?.equipment;
+            let outgoingCode = outgoingItem ? (outgoingItem.name || outgoingItem.asset_id || outgoingItem.slot_code || outgoingItem.brand || 'Tanpa Kode') : '-';
+            
+            if (pendingReplacement && pendingReplacement.acAssignType && outgoingItem && (outgoingItem.ac_in_asset_id || outgoingItem.ac_out_asset_id)) {
+              if (pendingReplacement.acAssignType === 'in' && outgoingItem.ac_in_asset_id) {
+                outgoingCode = outgoingItem.ac_in_asset_id;
+              } else if (pendingReplacement.acAssignType === 'out' && outgoingItem.ac_out_asset_id) {
+                outgoingCode = outgoingItem.ac_out_asset_id;
+              }
+            }
+            
+            let incomingCode = '-';
+            if (pendingSlotMove) {
+              const incomingSlot = slots.find(s => s.id === pendingSlotMove.sourceSlotId);
+              const incomingItem = incomingSlot?.equipment;
+              incomingCode = incomingItem ? (incomingItem.name || incomingItem.asset_id || incomingItem.slot_code || incomingItem.brand || 'Tanpa Kode') : '-';
+            } else if (pendingReplacement) {
+              incomingCode = (
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <select 
+                    value={pendingReplacement.selectedBrand}
+                    onChange={(e) => {
+                      const newBrand = e.target.value;
+                      const models = pendingReplacement.categoryBrands.filter(b => b.brand === newBrand);
+                      const newModel = models.length > 0 ? models[0].model_number : '';
+                      setPendingReplacement(prev => ({...prev, selectedBrand: newBrand, selectedModel: newModel}));
+                    }}
+                    style={{ background: 'var(--color-bg, #fff)', border: '1px solid var(--color-border, #ccc)', borderRadius: '6px', padding: '4px 8px', fontSize: '0.85rem', color: 'var(--color-text, #333)', maxWidth: '100px', outline: 'none', cursor: 'pointer' }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {Array.from(new Set(pendingReplacement.categoryBrands?.map(b => b.brand))).map((brand, idx) => (
+                      <option key={idx} value={brand}>{brand}</option>
+                    ))}
+                  </select>
+                  <select 
+                    value={pendingReplacement.selectedModel}
+                    onChange={(e) => setPendingReplacement(prev => ({...prev, selectedModel: e.target.value}))}
+                    style={{ background: 'var(--color-bg, #fff)', border: '1px solid var(--color-border, #ccc)', borderRadius: '6px', padding: '4px 8px', fontSize: '0.85rem', color: 'var(--color-text, #333)', maxWidth: '100px', outline: 'none', cursor: 'pointer' }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {pendingReplacement.categoryBrands?.filter(b => b.brand === pendingReplacement.selectedBrand).map((b, idx) => (
+                      <option key={idx} value={b.model_number}>{b.model_number || 'Standard'}</option>
+                    ))}
+                  </select>
+                  { (pendingReplacement.category?.name || '').toUpperCase().includes('AC') && (
+                    <select
+                      value={pendingReplacement.acAssignType || 'in_out'}
+                      onChange={(e) => setPendingReplacement(prev => ({...prev, acAssignType: e.target.value}))}
+                      style={{ background: 'var(--color-bg, #fff)', border: '1px solid var(--color-border, #ccc)', borderRadius: '6px', padding: '4px 8px', fontSize: '0.85rem', color: 'var(--color-text, #333)', maxWidth: '120px', outline: 'none', cursor: 'pointer' }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <option value="in_out">IN & OUT</option>
+                      <option value="in">Hanya IN</option>
+                      <option value="out">Hanya OUT</option>
+                    </select>
+                  )}
+                </div>
+              );
+            }
+
+            return (
+              <div style={{
+                background: 'var(--color-bg-secondary, rgba(0,0,0,0.02))',
+                border: '1px solid var(--color-border, rgba(0,0,0,0.08))',
+                borderRadius: '8px',
+                padding: '12px',
+                marginBottom: '16px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #64748b)', marginBottom: '4px' }}>Barang Keluar</div>
+                  <div style={{ fontWeight: '600', color: 'var(--color-danger, #ef4444)', fontSize: '0.9rem' }}>{outgoingCode}</div>
+                </div>
+                <div style={{ padding: '0 12px', color: 'var(--color-text-muted, #64748b)', display: 'flex', alignItems: 'center' }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                </div>
+                <div style={{ flex: 1, textAlign: 'right' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted, #64748b)', marginBottom: '4px' }}>Barang Masuk</div>
+                  <div style={{ fontWeight: '600', color: 'var(--color-success, #22c55e)', fontSize: '0.9rem' }}>{incomingCode}</div>
+                </div>
+              </div>
+            );
+          })()}
+          
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text)', marginBottom: '8px' }}>
+              Tanggal Pelepasan / Pembaruan:
+            </label>
+            <input 
+              type="date"
+              className="neu-inset"
+              value={unassignDate}
+              onChange={(e) => setUnassignDate(e.target.value)}
+              style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.9rem' }}
+            />
+          </div>
+          
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <button 
               className="neu-inset"
               onClick={() => {
-                if (selectedSlot) handleUnassignItem(selectedSlot.id, 'good');
+                if (pendingReplacement) handleUnassignItem(pendingReplacement.slotId, 'good');
+                else if (selectedSlot) handleUnassignItem(selectedSlot.id, 'good');
                 else if (selectedEquipment) handleDeleteEquipmentDetail('good');
               }}
               style={{ 
@@ -1590,7 +2054,8 @@ const DashboardPage = () => {
             <button 
               className="neu-inset"
               onClick={() => {
-                if (selectedSlot) handleUnassignItem(selectedSlot.id, 'damaged');
+                if (pendingReplacement) handleUnassignItem(pendingReplacement.slotId, 'damaged');
+                else if (selectedSlot) handleUnassignItem(selectedSlot.id, 'damaged');
                 else if (selectedEquipment) handleDeleteEquipmentDetail('damaged');
               }}
               style={{ 
@@ -1608,7 +2073,8 @@ const DashboardPage = () => {
             <button 
               className="neu-inset"
               onClick={() => {
-                if (selectedSlot) handleUnassignItem(selectedSlot.id, 'discard');
+                if (pendingReplacement) handleUnassignItem(pendingReplacement.slotId, 'discard');
+                else if (selectedSlot) handleUnassignItem(selectedSlot.id, 'discard');
                 else if (selectedEquipment) handleDeleteEquipmentDetail('discard');
               }}
               style={{ 
@@ -1626,6 +2092,157 @@ const DashboardPage = () => {
         </div>
       </Modal>
 
+      <Modal
+        isOpen={!!confirmPolygonSave}
+        onClose={() => {
+          setConfirmPolygonSave(null);
+          setPolygonName('');
+        }}
+        title="Simpan Area Ruangan"
+      >
+        <div style={{ padding: '8px' }}>
+          <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem', marginBottom: '16px' }}>
+            Masukkan nama untuk area ruangan yang baru saja Anda gambar.
+          </p>
+          <div style={{ marginBottom: '24px' }}>
+            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text-primary)', marginBottom: '8px' }}>
+              Nama Ruangan / Area
+            </label>
+            <Input
+              placeholder="Contoh: RUANG NIKEN"
+              value={polygonName}
+              onChange={(e) => setPolygonName(e.target.value)}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && polygonName.trim()) {
+                  confirmSavePolygon(polygonName.trim());
+                }
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+            <button
+              className="neu-raised"
+              onClick={() => {
+                setConfirmPolygonSave(null);
+                setPolygonName('');
+              }}
+              style={{
+                padding: '10px 24px',
+                border: 'none',
+                background: 'transparent',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                color: 'var(--color-text-secondary)',
+                fontWeight: '600'
+              }}
+            >
+              Batal
+            </button>
+            <button
+              className="neu-action-btn"
+              disabled={!polygonName.trim()}
+              onClick={() => confirmSavePolygon(polygonName.trim())}
+              style={{
+                padding: '10px 24px',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: polygonName.trim() ? 'pointer' : 'not-allowed',
+                background: polygonName.trim() ? 'var(--color-primary)' : 'rgba(0,0,0,0.1)',
+                color: polygonName.trim() ? 'white' : 'var(--color-text-muted)',
+                fontWeight: '600'
+              }}
+            >
+              Simpan Area
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={!!selectedRoomPolygonDetail}
+        onClose={() => setSelectedRoomPolygonDetail(null)}
+        title="Detail Area Ruangan"
+      >
+        {selectedRoomPolygonDetail && (
+          <div style={{ padding: '8px' }}>
+            <h3 style={{ fontSize: '1.25rem', color: 'var(--color-primary)', marginBottom: '16px' }}>
+              {selectedRoomPolygonDetail.polygon.name}
+            </h3>
+            
+            <div style={{ background: 'var(--color-bg-secondary)', padding: '16px', borderRadius: '12px', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ color: 'var(--color-text-secondary)' }}>Total Titik / Slot:</span>
+                <span style={{ fontWeight: '600', color: 'var(--color-text-primary)' }}>{selectedRoomPolygonDetail.slotsInRoom.length}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ color: 'var(--color-text-secondary)' }}>Slot Kosong:</span>
+                <span style={{ fontWeight: '600', color: 'var(--color-text-primary)' }}>{selectedRoomPolygonDetail.emptySlots.length}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--color-text-secondary)' }}>Slot Terisi (Barang):</span>
+                <span style={{ fontWeight: '600', color: 'var(--color-text-primary)' }}>{selectedRoomPolygonDetail.filledSlots.length}</span>
+              </div>
+            </div>
+
+            {selectedRoomPolygonDetail.filledSlots.length > 0 && (
+              <div style={{ marginBottom: '24px' }}>
+                <h4 style={{ fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text-primary)', marginBottom: '8px' }}>Daftar Barang di Area Ini:</h4>
+                <div style={{ maxHeight: '150px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {selectedRoomPolygonDetail.filledSlots.map(slot => (
+                    <div key={slot.id} style={{ background: 'var(--color-bg)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--color-border)', fontSize: '0.875rem' }}>
+                      <span style={{ fontWeight: '600' }}>{slot.category?.name || slot.equipment?.category?.name || 'Item'}</span>
+                      {slot.equipment && (
+                        <span style={{ color: 'var(--color-text-secondary)', marginLeft: '8px' }}>
+                          ({slot.equipment.asset_id || slot.equipment.name})
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              {isEditMode && (
+                <button
+                  className="neu-raised-sm"
+                  onClick={() => {
+                    setActiveModal('delete_polygon_confirm');
+                  }}
+                  style={{
+                    padding: '10px 24px',
+                    border: '1px solid var(--color-danger)',
+                    background: 'transparent',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    color: 'var(--color-danger)',
+                    fontWeight: '600'
+                  }}
+                >
+                  Hapus Area
+                </button>
+              )}
+              <button
+                className="neu-raised"
+                onClick={() => setSelectedRoomPolygonDetail(null)}
+                style={{
+                  padding: '10px 24px',
+                  border: 'none',
+                  background: 'var(--color-primary)',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  color: 'white',
+                  fontWeight: '600'
+                }}
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <ConfirmModal 
         isOpen={activeModal === 'delete_slot_confirm'}
         onClose={() => { setActiveModal(null); setSelectedSlot(null); }}
@@ -1636,6 +2253,26 @@ const DashboardPage = () => {
         }}
         title="Hapus Titik Slot"
         message="Apakah Anda yakin ingin menghapus titik slot kosong ini?"
+      />
+
+      <ConfirmModal 
+        isOpen={activeModal === 'delete_polygon_confirm'}
+        onClose={() => setActiveModal(null)}
+        onConfirm={async () => {
+          if (selectedRoomPolygonDetail) {
+            try {
+              await deleteRoomPolygon(selectedRoomPolygonDetail.polygon.id);
+              setRoomPolygons(prev => prev.filter(p => p.id !== selectedRoomPolygonDetail.polygon.id));
+              showToast('Area ruangan berhasil dihapus', 'success');
+              setSelectedRoomPolygonDetail(null);
+            } catch (err) {
+              showToast('Gagal menghapus area', 'error');
+            }
+          }
+          setActiveModal(null);
+        }}
+        title="Hapus Area Ruangan"
+        message={`Apakah Anda yakin ingin menghapus area ruangan "${selectedRoomPolygonDetail?.polygon?.name}"?`}
       />
 
       <ConfirmModal 

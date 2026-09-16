@@ -1,6 +1,6 @@
 import uuid
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -14,6 +14,7 @@ from app.models.building import Building
 from app.models.user import User
 from app.models.asset_inventory import AssetInventory
 from app.models.inventory_history_log import InventoryHistoryLog
+from app.schemas.inventory import AssetInventoryResponse
 from app.schemas.slot_template import SlotCreate, SlotResponse, SlotWithEquipment
 from app.api.deps import get_current_user
 
@@ -29,6 +30,27 @@ def abbreviate(name: str) -> str:
             return w.upper()
         return w[0].upper()
     return "".join(word[0].upper() for word in words)
+
+import os
+
+def generate_ac_name(ac_in_id: str, ac_out_id: str) -> str:
+    if ac_in_id and ac_out_id:
+        in_base = ac_in_id.replace('-IN', '')
+        out_base = ac_out_id.replace('-OUT', '')
+        if in_base == out_base:
+            return f"{in_base}-IN/OUT"
+        else:
+            common_prefix = os.path.commonprefix([in_base, out_base])
+            if common_prefix and len(common_prefix) > 4:
+                in_suffix = in_base[len(common_prefix):]
+                out_suffix = out_base[len(common_prefix):]
+                return f"{common_prefix}{in_suffix}IN/{out_suffix}OUT"
+            return f"{in_base}IN/{out_base}OUT"
+    elif ac_in_id:
+        return ac_in_id
+    elif ac_out_id:
+        return ac_out_id
+    return "AC-IN/OUT"
 
 @router.get("/slots", response_model=List[SlotWithEquipment])
 async def list_all_slots(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -76,16 +98,18 @@ async def create_slot(
 
     # Generate slot_code (ID Tempat / ID Lokasi e.g. GUL11)
     b_abbr = abbreviate(flr.building.name) if flr.building else "GU"
-    c_abbr = abbreviate(cat.name)
-    flr_num = flr.floor_number
+    flr_abbr = abbreviate(flr.name) if flr else ""
+    rm_abbr = abbreviate(slot_in.room_name) if slot_in.room_name else ""
     
-    count_res = await db.execute(
-        select(func.count(SlotTemplate.id))
-        .where(SlotTemplate.floor_id == floor_id)
-        .where(SlotTemplate.category_id == slot_in.category_id)
-    )
+    query = select(func.count(SlotTemplate.id)).where(SlotTemplate.floor_id == floor_id)
+    if slot_in.room_name:
+        query = query.where(SlotTemplate.room_name == slot_in.room_name)
+    else:
+        query = query.where(SlotTemplate.room_name.is_(None))
+        
+    count_res = await db.execute(query)
     s_count = (count_res.scalar() or 0) + 1
-    generated_slot_code = f"{b_abbr}{c_abbr}{flr_num}{s_count}"
+    generated_slot_code = f"{b_abbr}{flr_abbr}{rm_abbr}{s_count:03d}"
 
     db_slot = SlotTemplate(
         floor_id=floor_id,
@@ -105,6 +129,7 @@ async def update_slot_position(
     slot_id: uuid.UUID,
     position_x: float,
     position_y: float,
+    room_name: str = Query(None, description="Set to string to update room name, empty string to clear"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -115,6 +140,8 @@ async def update_slot_position(
         
     slot.position_x = position_x
     slot.position_y = position_y
+    if room_name is not None:
+        slot.room_name = room_name if room_name != "" else None
     
     await db.commit()
     await db.refresh(slot)
@@ -139,6 +166,9 @@ async def assign_equipment_to_slot(
     slot_id: uuid.UUID,
     brand: str = None,
     model_number: str = None,
+    ac_assign_type: str = None,
+    ac_in_asset_id_param: str = Query(None, alias="ac_in_asset_id"),
+    ac_out_asset_id_param: str = Query(None, alias="ac_out_asset_id"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -169,73 +199,102 @@ async def assign_equipment_to_slot(
     if cat.initial_stock <= 0 and avail_assets_count <= 0 and not brand:
         raise HTTPException(status_code=400, detail="Stock is empty for this category")
         
-    # Decrement stock manually if > 0
-    if cat.initial_stock > 0:
-        cat.initial_stock -= 1
+    is_ac = 'AC' in (cat.name or '').upper()
+    ac_in_asset_id = None
+    ac_out_asset_id = None
+    auto_name = None
+    avail_asset = None
 
-    # Generate auto-name (ID Barang) strictly incrementing
-    bldg_abbr = abbreviate(slot.floor.building.name) if (slot.floor and slot.floor.building) else "GU"
-    cat_abbr = abbreviate(cat.name)
-    floor_num = slot.floor.floor_number if slot.floor else 1
-    
-    cat_clean = cat.name.replace(" ", "")
+    if is_ac and ac_assign_type:
+        needed_types = []
+        if ac_assign_type == 'in': needed_types = ['in']
+        elif ac_assign_type == 'out': needed_types = ['out']
+        elif ac_assign_type == 'in_out': needed_types = ['in', 'out']
 
-    # 1. First check if an available AssetInventory asset exists for this category/brand/model
-    asset_query = select(AssetInventory).where(
-        AssetInventory.category_id == cat.id,
-        AssetInventory.status == 'available'
-    )
-    if brand:
-        asset_query = asset_query.where(AssetInventory.brand == brand)
-    if model_number and model_number != 'Standard':
-        asset_query = asset_query.where(AssetInventory.model_number == model_number)
+        found_assets = {}
+        for nt in needed_types:
+            asset_query = select(AssetInventory).where(
+                AssetInventory.category_id == cat.id,
+                AssetInventory.status == 'available',
+                AssetInventory.ac_type == nt
+            )
+            if brand: asset_query = asset_query.where(AssetInventory.brand == brand)
+            if model_number and model_number != 'Standard': asset_query = asset_query.where(AssetInventory.model_number == model_number)
 
-    asset_res = await db.execute(asset_query.order_by(AssetInventory.created_at.asc()))
-    avail_asset = asset_res.scalars().first()
+            if nt == 'in' and ac_in_asset_id_param:
+                asset_query = asset_query.where(AssetInventory.asset_id == ac_in_asset_id_param)
+            if nt == 'out' and ac_out_asset_id_param:
+                asset_query = asset_query.where(AssetInventory.asset_id == ac_out_asset_id_param)
 
-    if avail_asset:
-        auto_name = avail_asset.asset_id
-        avail_asset.status = 'in_use'
+            res = await db.execute(asset_query.order_by(AssetInventory.created_at.asc()))
+            found = res.scalars().first()
+            if not found:
+                part_name = "Unit Dalam (IN)" if nt == 'in' else "Kompresor (OUT)"
+                raise HTTPException(status_code=400, detail=f"Stok untuk {part_name} kosong atau ID tidak cocok dengan merk/tipe ini.")
+            found_assets[nt] = found
+
+        if 'in' in found_assets:
+            a = found_assets['in']
+            a.status = 'in_use'
+            ac_in_asset_id = a.asset_id
+        if 'out' in found_assets:
+            a = found_assets['out']
+            a.status = 'in_use'
+            ac_out_asset_id = a.asset_id
+
+        if ac_assign_type == 'in_out':
+            auto_name = generate_ac_name(ac_in_asset_id, ac_out_asset_id)
+        elif ac_assign_type == 'in':
+            auto_name = generate_ac_name(ac_in_asset_id, None)
+        elif ac_assign_type == 'out':
+            auto_name = generate_ac_name(None, ac_out_asset_id)
+            
     else:
-        # 2. If no AssetInventory item exists, generate auto_name strictly incrementing MAX ID number ever recorded
-        import re
-        all_names = []
-
-        # Check Equipment table
-        eqs_res = await db.execute(select(Equipment.name).where(Equipment.category_id == cat.id))
-        all_names.extend([n for n in eqs_res.scalars().all() if n])
-
-        # Check AssetInventory table
-        assets_res = await db.execute(select(AssetInventory.asset_id).where(AssetInventory.category_id == cat.id))
-        all_names.extend([n for n in assets_res.scalars().all() if n])
-
-        # Check InventoryHistoryLog table (includes all deleted, discarded, deployed items)
-        hist_res = await db.execute(
-            select(InventoryHistoryLog.asset_id)
-            .where(InventoryHistoryLog.category_id == cat.id)
-            .where(InventoryHistoryLog.asset_id.isnot(None))
+        # 1. First check if an available AssetInventory asset exists for this category/brand/model
+        asset_query = select(AssetInventory).where(
+            AssetInventory.category_id == cat.id,
+            AssetInventory.status == 'available'
         )
-        all_names.extend([n for n in hist_res.scalars().all() if n])
+        if brand:
+            asset_query = asset_query.where(AssetInventory.brand == brand)
+        if model_number and model_number != 'Standard':
+            asset_query = asset_query.where(AssetInventory.model_number == model_number)
+    
+        asset_res = await db.execute(asset_query.order_by(AssetInventory.created_at.asc()))
+        avail_asset = asset_res.scalars().first()
 
-        max_num = 0
-        for n in all_names:
-            match = re.search(r'(\d+)$', n.strip())
-            if match:
-                num = int(match.group(1))
-                if num > max_num:
-                    max_num = num
+        if avail_asset:
+            auto_name = avail_asset.asset_id
+            avail_asset.status = 'in_use'
+            # Do not decrement initial_stock because we are using an already-tracked AssetInventory item
+        else:
+            # Decrement stock manually if > 0 (pulling from bulk initial_stock)
+            if cat.initial_stock > 0:
+                cat.initial_stock -= 1
+    
+            # 2. If no AssetInventory item exists, generate auto_name using the structured format
+            from app.utils.asset_id_generator import get_next_asset_ids
+            new_ids = await get_next_asset_ids(cat.name, brand, model_number, db, cat.id, 1)
+            auto_name = new_ids[0]
 
-        candidate = max_num + 1
-        auto_name = f"{cat.name} - {candidate}"
+    # Generate abbreviation variables needed for slot_code
+    bldg_abbr = abbreviate(slot.floor.building.name) if (slot.floor and slot.floor.building) else "GU"
+    flr_abbr = abbreviate(slot.floor.name) if slot.floor else ""
+    rm_abbr = abbreviate(slot.room_name) if slot.room_name else ""
 
     if not slot.slot_code:
-        slot_count_res = await db.execute(
-            select(func.count(SlotTemplate.id))
-            .where(SlotTemplate.floor_id == slot.floor_id)
-            .where(SlotTemplate.category_id == cat.id)
+        query = select(func.count(SlotTemplate.id)).where(
+            SlotTemplate.floor_id == slot.floor_id,
+            SlotTemplate.slot_code.isnot(None)
         )
-        s_cnt = slot_count_res.scalar() or 1
-        slot.slot_code = f"{bldg_abbr}{cat_abbr}{floor_num}{s_cnt}"
+        if slot.room_name:
+            query = query.where(SlotTemplate.room_name == slot.room_name)
+        else:
+            query = query.where(SlotTemplate.room_name.is_(None))
+            
+        slot_count_res = await db.execute(query)
+        s_cnt = (slot_count_res.scalar() or 0) + 1
+        slot.slot_code = f"{bldg_abbr}{flr_abbr}{rm_abbr}{s_cnt:03d}"
 
     # Create equipment
     new_equipment = Equipment(
@@ -247,7 +306,9 @@ async def assign_equipment_to_slot(
         model_number=model_number,
         position_x=slot.position_x,
         position_y=slot.position_y,
-        status='active'
+        status='active',
+        ac_in_asset_id=ac_in_asset_id,
+        ac_out_asset_id=ac_out_asset_id
     )
     db.add(new_equipment)
     await db.flush() # get id
@@ -256,26 +317,29 @@ async def assign_equipment_to_slot(
     slot.equipment_id = new_equipment.id
     
     # Log history
-    room_txt = f" - Ruang: {slot.room_name}" if slot.room_name else ""
+    # Log history
+    b_name = slot.floor.building.name if (slot.floor and slot.floor.building) else "Gedung Utama"
+    f_name = slot.floor.name if slot.floor else "Lantai 1"
+    room_txt = f", Ruang {slot.room_name}" if slot.room_name else ""
+
     log = InventoryHistoryLog(
         category_id=cat.id,
         asset_id=auto_name,
         slot_code=slot.slot_code,
         action_type="deploy",
-        building_name=slot.floor.building.name,
-        floor_name=slot.floor.name,
+        building_name=b_name,
+        floor_name=f_name,
         room_name=slot.room_name,
         brand=brand,
         model_number=model_number,
         status="Dipasang",
-        location_info=f"Penempatan di {slot.floor.building.name} - {slot.floor.name}{room_txt}",
+        location_info=f'"{auto_name}" Ditempatkan di {b_name}, {f_name}{room_txt}',
         performed_by=current_user.id
     )
     db.add(log)
     
     await db.commit()
     
-    # Reload slot with relationships
     final_res = await db.execute(
         select(SlotTemplate)
         .where(SlotTemplate.id == slot_id)
@@ -349,14 +413,20 @@ async def move_equipment_between_slots(
     target_slot.equipment_id = eq.id
 
     # Step 3: Record History Log for drag & drop move
+    # Step 3: Record History Log for drag & drop move
     bldg_name = target_slot.floor.building.name if (target_slot.floor and target_slot.floor.building) else "Gedung Utama"
     flr_name = target_slot.floor.name if target_slot.floor else "-"
-    source_rm = f"Ruang {source_slot.room_name}" if source_slot.room_name else (source_slot.slot_code or "Slot Lama")
-    target_rm = f"Ruang {target_slot.room_name}" if target_slot.room_name else (target_slot.slot_code or "Slot Baru")
+    source_bldg = source_slot.floor.building.name if (source_slot.floor and source_slot.floor.building) else "Gedung Utama"
+    source_flr = source_slot.floor.name if source_slot.floor else "-"
+    
+    source_rm = f", Ruang {source_slot.room_name}" if source_slot.room_name else ""
+    target_rm = f", Ruang {target_slot.room_name}" if target_slot.room_name else ""
+
+    item_code = eq.name if eq and eq.name else (eq.model_number if eq and eq.model_number else (target_slot.category.name if target_slot.category else "Aset"))
 
     move_log = InventoryHistoryLog(
         category_id=target_slot.category_id,
-        asset_id=eq.name or (target_slot.category.name if target_slot.category else "Aset"),
+        asset_id=item_code,
         slot_code=target_slot.slot_code or source_slot.slot_code,
         action_type="move",
         building_name=bldg_name,
@@ -365,7 +435,7 @@ async def move_equipment_between_slots(
         brand=eq.brand,
         model_number=eq.model_number,
         status="Dipasang (Dipindahkan)",
-        location_info=f"Dipindahkan dari {source_rm} ke {target_rm} ({bldg_name} - {flr_name})",
+        location_info=f'"{item_code}" Dipindahkan dari {source_bldg}, {source_flr}{source_rm} ke {bldg_name}, {flr_name}{target_rm}',
         performed_by=current_user.id
     )
     db.add(move_log)
@@ -384,10 +454,239 @@ async def move_equipment_between_slots(
     )
     return final_res.scalars().first()
 
+@router.post("/slots/{slot_id}/replace", response_model=SlotWithEquipment)
+async def replace_equipment_in_slot(
+    slot_id: uuid.UUID,
+    brand: str = None,
+    model_number: str = None,
+    ac_assign_type: str = None,
+    destination: str = None, # 'good', 'damaged', 'discard'
+    action_date: str = None,
+    ac_in_asset_id_param: str = Query(None, alias="ac_in_asset_id"),
+    ac_out_asset_id_param: str = Query(None, alias="ac_out_asset_id"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Fetch slot
+    result = await db.execute(
+        select(SlotTemplate)
+        .where(SlotTemplate.id == slot_id)
+        .options(
+            selectinload(SlotTemplate.equipment).selectinload(Equipment.category),
+            selectinload(SlotTemplate.floor).selectinload(Floor.building),
+            selectinload(SlotTemplate.category)
+        )
+    )
+    slot = result.scalars().first()
+    if not slot:
+        raise HTTPException(status_code=404, detail="Slot not found")
+        
+    if not slot.equipment_id:
+        raise HTTPException(status_code=400, detail="Slot is empty, cannot replace")
+
+    eq = slot.equipment
+    cat = slot.category or (eq.category if eq else None)
+    
+    is_ac = 'AC' in (cat.name or '').upper() if cat else False
+    
+    if not cat:
+        raise HTTPException(status_code=400, detail="Unknown category for slot")
+
+    # Step 1: Check availability for the new items
+    needed_types = []
+    if is_ac and ac_assign_type:
+        if ac_assign_type == 'in': needed_types = ['in']
+        elif ac_assign_type == 'out': needed_types = ['out']
+        elif ac_assign_type == 'in_out': needed_types = ['in', 'out']
+    
+    found_assets = {}
+    if needed_types:
+        for nt in needed_types:
+            asset_query = select(AssetInventory).where(
+                AssetInventory.category_id == cat.id,
+                AssetInventory.status == 'available',
+                AssetInventory.ac_type == nt
+            )
+            if brand: asset_query = asset_query.where(AssetInventory.brand == brand)
+            if model_number and model_number != 'Standard': asset_query = asset_query.where(AssetInventory.model_number == model_number)
+
+            if nt == 'in' and ac_in_asset_id_param:
+                asset_query = asset_query.where(AssetInventory.asset_id == ac_in_asset_id_param)
+            if nt == 'out' and ac_out_asset_id_param:
+                asset_query = asset_query.where(AssetInventory.asset_id == ac_out_asset_id_param)
+
+            res = await db.execute(asset_query.order_by(AssetInventory.created_at.asc()))
+            found = res.scalars().first()
+            if not found:
+                part_name = "Unit Dalam (IN)" if nt == 'in' else "Kompresor (OUT)"
+                raise HTTPException(status_code=400, detail=f"Stok untuk {part_name} baru kosong atau ID tidak cocok dengan merk/tipe ini.")
+            found_assets[nt] = found
+    else:
+        # Non-AC replacement stock check
+        asset_query = select(AssetInventory).where(
+            AssetInventory.category_id == cat.id,
+            AssetInventory.status == 'available'
+        )
+        if brand: asset_query = asset_query.where(AssetInventory.brand == brand)
+        if model_number and model_number != 'Standard': asset_query = asset_query.where(AssetInventory.model_number == model_number)
+        asset_res = await db.execute(asset_query.order_by(AssetInventory.created_at.asc()))
+        avail_asset = asset_res.scalars().first()
+
+        if not avail_asset and cat.initial_stock <= 0:
+            raise HTTPException(status_code=400, detail="Stok kosong untuk merk/tipe ini.")
+        if avail_asset:
+            found_assets['non_ac'] = avail_asset
+
+    # Step 2: Unassign the old items
+    bldg_name = slot.floor.building.name if slot.floor and slot.floor.building else "Gedung Utama"
+    flr_name = slot.floor.name if slot.floor else "-"
+    rm_name = slot.room_name or ""
+    rm_suffix = f", Ruang {rm_name}" if rm_name else ""
+    
+    if destination == 'good':
+        status_text = 'Inventori Baru'
+        action_type = 'restock'
+    elif destination == 'damaged':
+        status_text = 'Inventori Rusak'
+        action_type = 'damage'
+    else:
+        status_text = 'Dibuang'
+        action_type = 'remove'
+
+    parts_to_unassign = []
+    if is_ac and eq:
+        if ac_assign_type == 'in' and getattr(eq, 'ac_in_asset_id', None):
+            parts_to_unassign.append(('in', eq.ac_in_asset_id))
+            eq.ac_in_asset_id = None
+        elif ac_assign_type == 'out' and getattr(eq, 'ac_out_asset_id', None):
+            parts_to_unassign.append(('out', eq.ac_out_asset_id))
+            eq.ac_out_asset_id = None
+        elif ac_assign_type == 'in_out' or not ac_assign_type:
+            if getattr(eq, 'ac_in_asset_id', None): parts_to_unassign.append(('in', eq.ac_in_asset_id))
+            if getattr(eq, 'ac_out_asset_id', None): parts_to_unassign.append(('out', eq.ac_out_asset_id))
+            eq.ac_in_asset_id = None
+            eq.ac_out_asset_id = None
+        
+        # Fallback if both were None but it's an AC (to avoid empty parts_to_unassign if we're doing full replacement)
+        if not parts_to_unassign and (ac_assign_type == 'in_out' or not ac_assign_type):
+            item_code = eq.name if eq and eq.name else (eq.model_number if eq and eq.model_number else f"{cat.name} - Asset")
+            parts_to_unassign.append((None, item_code))
+    else:
+        item_code = eq.name if eq and eq.name else (eq.model_number if eq and eq.model_number else f"{cat.name} - Asset")
+        parts_to_unassign = [(None, item_code)]
+
+    for p_type, old_asset_id in parts_to_unassign:
+        if destination in ['good', 'damaged']:
+            new_status = 'available' if destination == 'good' else 'damaged'
+            existing_inv_res = await db.execute(select(AssetInventory).where(AssetInventory.asset_id == old_asset_id))
+            existing_inv = existing_inv_res.scalars().first()
+            if existing_inv:
+                existing_inv.status = new_status
+            else:
+                asset_inv = AssetInventory(
+                    category_id=cat.id,
+                    asset_id=old_asset_id,
+                    status=new_status,
+                    brand=eq.brand if eq else None,
+                    model_number=eq.model_number if eq else None,
+                    ac_type=p_type
+                )
+                db.add(asset_inv)
+
+        log = InventoryHistoryLog(
+            category_id=cat.id,
+            asset_id=old_asset_id,
+            slot_code=slot.slot_code,
+            action_type=action_type,
+            building_name=bldg_name,
+            floor_name=flr_name,
+            room_name=rm_name,
+            brand=eq.brand if eq else None,
+            model_number=eq.model_number if eq else None,
+            status=status_text,
+            location_info=f'"{old_asset_id}" Dilepas/Diganti dari {bldg_name}, {flr_name}{rm_suffix}',
+            performed_by=current_user.id
+        )
+        if action_date:
+            from datetime import datetime
+            try: log.created_at = datetime.fromisoformat(action_date)
+            except ValueError: pass
+        db.add(log)
+
+    # Step 3: Assign the new items
+    if needed_types:
+        if 'in' in found_assets:
+            a = found_assets['in']
+            a.status = 'in_use'
+            eq.ac_in_asset_id = a.asset_id
+        if 'out' in found_assets:
+            a = found_assets['out']
+            a.status = 'in_use'
+            eq.ac_out_asset_id = a.asset_id
+        
+        # Ensure we commit the changes to eq before generating the name
+        db.add(eq)
+        # update the equipment name if needed
+        eq.name = generate_ac_name(eq.ac_in_asset_id, eq.ac_out_asset_id)
+        eq.status = 'active'
+    else:
+        if 'non_ac' in found_assets:
+            avail = found_assets['non_ac']
+            eq.name = avail.asset_id
+            avail.status = 'in_use'
+        else:
+            if cat.initial_stock > 0: cat.initial_stock -= 1
+            from app.utils.asset_id_generator import get_next_asset_ids
+            new_ids = await get_next_asset_ids(cat.name, brand, model_number, db, cat.id, 1)
+            eq.name = new_ids[0]
+            eq.status = 'active'
+            
+    # Update brand/model
+    eq.brand = brand
+    eq.model_number = model_number
+
+    # Also log the new assignment
+    from datetime import datetime
+    assign_log = InventoryHistoryLog(
+        category_id=cat.id,
+        asset_id=eq.name,
+        slot_code=slot.slot_code,
+        action_type="deploy",
+        building_name=bldg_name,
+        floor_name=flr_name,
+        room_name=rm_name,
+        brand=brand,
+        model_number=model_number,
+        status="Dipasang",
+        location_info=f'"{eq.name}" Penempatan/Penggantian di {bldg_name} - {flr_name}{rm_suffix}',
+        performed_by=current_user.id
+    )
+    if action_date:
+        try: assign_log.created_at = datetime.fromisoformat(action_date)
+        except ValueError: pass
+    db.add(assign_log)
+
+    # Step 4: If full replacement was not AC or it was full AC, we keep the equipment.
+    # What if it's partial? Equipment stays, we just updated IDs.
+    
+    await db.commit()
+
+    final_res = await db.execute(
+        select(SlotTemplate)
+        .where(SlotTemplate.id == slot_id)
+        .options(
+            selectinload(SlotTemplate.equipment).selectinload(Equipment.category),
+            selectinload(SlotTemplate.category),
+            selectinload(SlotTemplate.floor).selectinload(Floor.building)
+        )
+    )
+    return final_res.scalars().first()
+
 @router.delete("/slots/{slot_id}/unassign", status_code=status.HTTP_204_NO_CONTENT)
 async def unassign_equipment_from_slot(
     slot_id: uuid.UUID,
     destination: str = None, # 'good', 'damaged', 'discard'
+    action_date: str = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -422,8 +721,6 @@ async def unassign_equipment_from_slot(
     if destination == 'good':
         status_text = 'Inventori Baru'
         action_type = 'restock'
-        if cat and not cat.has_id:
-            cat.initial_stock += 1
     elif destination == 'damaged':
         status_text = 'Inventori Rusak'
         action_type = 'damage'
@@ -431,34 +728,64 @@ async def unassign_equipment_from_slot(
         status_text = 'Dibuang'
         action_type = 'remove'
 
-    # Save to AssetInventory if permanent ID asset
-    if cat and cat.has_id:
-        if destination in ['good', 'damaged']:
-            asset_inv = AssetInventory(
-                category_id=cat.id,
-                asset_id=eq.name if eq else f"{cat.name} - Asset",
-                status='available' if destination == 'good' else 'damaged',
-            )
-            db.add(asset_inv)
+    # Identify parts to unassign
+    parts_to_unassign = []
+    is_ac = 'AC' in (cat.name or '').upper() if cat else False
+    
+    if is_ac and eq:
+        if getattr(eq, 'ac_in_asset_id', None):
+            parts_to_unassign.append(('in', eq.ac_in_asset_id))
+        if getattr(eq, 'ac_out_asset_id', None):
+            parts_to_unassign.append(('out', eq.ac_out_asset_id))
+            
+    if not parts_to_unassign:
+        item_code = eq.name if eq and eq.name else (eq.model_number if eq and eq.model_number else f"{cat.name} - Asset")
+        parts_to_unassign = [(None, item_code)]
 
-    # Save to InventoryHistoryLog for /history view ONLY if category exists
-    if cat:
-        rm_suffix = f" - Ruang: {rm_name}" if rm_name else ""
-        log = InventoryHistoryLog(
-            category_id=cat.id,
-            asset_id=eq.name if eq else cat.name,
-            slot_code=slot.slot_code,
-            action_type=action_type,
-            building_name=bldg_name,
-            floor_name=flr_name,
-            room_name=rm_name,
-            brand=eq.brand if eq else None,
-            model_number=eq.model_number if eq else None,
-            status=status_text,
-            location_info=f"Dilepas dari {bldg_name} - {flr_name}{rm_suffix}",
-            performed_by=current_user.id
-        )
-        db.add(log)
+    for p_type, asset_id in parts_to_unassign:
+        if cat:
+            if destination in ['good', 'damaged']:
+                new_status = 'available' if destination == 'good' else 'damaged'
+                existing_inv_res = await db.execute(select(AssetInventory).where(AssetInventory.asset_id == asset_id))
+                existing_inv = existing_inv_res.scalars().first()
+                if existing_inv:
+                    existing_inv.status = new_status
+                else:
+                    asset_inv = AssetInventory(
+                        category_id=cat.id,
+                        asset_id=asset_id,
+                        status=new_status,
+                        brand=eq.brand if eq else None,
+                        model_number=eq.model_number if eq else None,
+                        ac_type=p_type
+                    )
+                    db.add(asset_inv)
+
+        # Save to InventoryHistoryLog for /history view ONLY if category exists
+        if cat:
+            rm_suffix = f", Ruang {rm_name}" if rm_name else ""
+            
+            log = InventoryHistoryLog(
+                category_id=cat.id,
+                asset_id=asset_id,
+                slot_code=slot.slot_code,
+                action_type=action_type,
+                building_name=bldg_name,
+                floor_name=flr_name,
+                room_name=rm_name,
+                brand=eq.brand if eq else None,
+                model_number=eq.model_number if eq else None,
+                status=status_text,
+                location_info=f'"{asset_id}" Dilepas dari {bldg_name}, {flr_name}{rm_suffix}',
+                performed_by=current_user.id
+            )
+            if action_date:
+                from datetime import datetime
+                try:
+                    log.created_at = datetime.fromisoformat(action_date)
+                except ValueError:
+                    pass
+            db.add(log)
     
     slot.equipment_id = None
     await db.flush()

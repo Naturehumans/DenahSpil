@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { getCategories, createCategory, updateCategory, deleteCategory } from '../api/categories';
 import { getAllEquipments } from '../api/equipments';
-import { getInventoryLogs, addStockToInventory, getAssets, restoreAsset, deleteAsset } from '../api/inventory';
+import { getInventoryLogs, addStockToInventory, getAssets, restoreAsset, deleteAsset, deleteAssetsByBrand, deleteOneAssetByBrand } from '../api/inventory';
 import { useToast } from '../contexts/ToastContext';
-import { Search, Package, PackageX, Wrench, Trash2, ArrowLeft, Plus, Check, X, MapPin, History, Tag, Edit2, AlertTriangle } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { Search, Package, PackageX, Wrench, Trash2, ArrowLeft, Plus, Minus, Check, X, MapPin, History, Tag, Edit2, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ConfirmModal from '../components/UI/ConfirmModal';
 
@@ -40,15 +41,29 @@ const InventoryPage = () => {
     model_number: '',
     stock: '1',
     min_stock: '1',
-    warranty_months: '0'
+    warranty_months: '0',
+    purchase_date: '',
+    ac_type: 'in_out'
   });
 
   // Stock & Damaged modals
   const [addStockModal, setAddStockModal] = useState(null);
   const [stockToAdd, setStockToAdd] = useState(1);
+  const [acType, setAcType] = useState('in_out');
   const [confirmDeleteDamaged, setConfirmDeleteDamaged] = useState(null);
   const [confirmDeleteBrand, setConfirmDeleteBrand] = useState(null);
   const [itemHistoryModal, setItemHistoryModal] = useState(null);
+
+  const { showToast } = useToast();
+  const navigate = useNavigate();
+  const { isAdmin } = useAuth();
+
+  useEffect(() => {
+    if (isAdmin === false) {
+      showToast('Akses ditolak. Anda hanya memiliki akses baca.', 'error');
+      navigate('/dashboard');
+    }
+  }, [isAdmin, navigate, showToast]);
 
   const handleDeleteBrand = (item, e) => {
     if (e) {
@@ -62,93 +77,23 @@ const InventoryPage = () => {
   const confirmDeleteBrandAction = async () => {
     if (!confirmDeleteBrand) return;
     const item = confirmDeleteBrand;
-    const catName = selectedCategoryView?.name || item.category_name || 'Item';
-    const catId = selectedCategoryView?.id || item.category_id;
-    const catColor = selectedCategoryView?.color || item.category_color || '#3b82f6';
-    const stockQty = parseInt(item.stock) || 1;
-
     try {
-      // 1. Remove brand item from spil_category_brands localStorage across ALL keys
-      const savedBrands = localStorage.getItem('spil_category_brands');
-      if (savedBrands) {
-        let map = JSON.parse(savedBrands);
-        Object.keys(map).forEach(key => {
-          if (Array.isArray(map[key])) {
-            map[key] = map[key].filter(b => {
-              const brandMatch = (b.brand || '').toLowerCase().trim() === (item.brand || '').toLowerCase().trim();
-              const modelMatch = (b.model_number || '').toLowerCase().trim() === (item.model_number || '').toLowerCase().trim();
-              const idMatch = b.id && item.id && String(b.id) === String(item.id);
-              return !(idMatch || (brandMatch && modelMatch));
-            });
-          }
-        });
-        localStorage.setItem('spil_category_brands', JSON.stringify(map));
-      }
+      await deleteAssetsByBrand({
+        category_id: item.category_id,
+        brand: item.brand === 'Tanpa Merk' ? undefined : item.brand,
+        model_number: item.model_number === 'Standard' ? undefined : item.model_number,
+      });
 
-      // 2. Format batch asset ID string: e.g. "Lampu-1 -- 32" as requested by user
-      const assetIdLabel = stockQty > 1 
-        ? `${catName}-1 -- ${stockQty}` 
-        : `${catName}-1`;
-
-      // 3. Save log entry to both spil_local_history_logs and spil_local_logs
-      const newLog = {
-        id: 'log_' + Date.now(),
-        category_id: catId,
-        category_name: catName,
-        category: {
-          id: catId,
-          name: catName,
-          color: catColor
-        },
-        asset_id: assetIdLabel,
-        brand: item.brand,
-        model_number: item.model_number || 'Standard',
-        action_type: 'remove',
-        status: 'Dibuang / Dihapus (stok dibuang/dihapus)',
-        quantity: stockQty,
-        qty: stockQty,
-        building_name: '-',
-        floor_name: '-',
-        room_name: '-',
-        location_info: 'Gudang (Stok dibuang/dihapus)',
-        notes: '(stok dibuang/dihapus)',
-        created_at: new Date().toISOString()
-      };
-
-      try {
-        const savedHistory = localStorage.getItem('spil_local_history_logs');
-        const histLogs = savedHistory ? JSON.parse(savedHistory) : [];
-        histLogs.unshift(newLog);
-        localStorage.setItem('spil_local_history_logs', JSON.stringify(histLogs));
-      } catch (e) { console.error('History log save error:', e); }
-
-      try {
-        const savedLogs = localStorage.getItem('spil_local_logs');
-        const locLogs = savedLogs ? JSON.parse(savedLogs) : [];
-        locLogs.unshift(newLog);
-        localStorage.setItem('spil_local_logs', JSON.stringify(locLogs));
-      } catch (e) { console.error('Local log save error:', e); }
-
-      // 4. Directly update local state so card disappears immediately
-      setBrandInventory(prev => prev.filter(b => {
-        const brandMatch = (b.brand || '').toLowerCase().trim() === (item.brand || '').toLowerCase().trim();
-        const modelMatch = (b.model_number || '').toLowerCase().trim() === (item.model_number || '').toLowerCase().trim();
-        const idMatch = b.id && item.id && String(b.id) === String(item.id);
-        return !(idMatch || (brandMatch && modelMatch));
-      }));
-
-      showToast(`Merk ${item.brand} (${stockQty} unit) berhasil dibuang & dicatat dalam riwayat log`, 'success');
+      showToast(`Merk ${item.brand} berhasil dibuang & dicatat dalam riwayat log`, 'success');
       setConfirmDeleteBrand(null);
-      await fetchData();
+      await fetchData(false);
     } catch (err) {
-      console.error(err);
-      showToast('Gagal membuang stok barang', 'error');
+      console.error('Delete brand error:', err.response?.data || err);
+      showToast('Gagal membuang stok barang: ' + (err.response?.data?.detail || err.message), 'error');
     }
   };
   
-  const { showToast } = useToast();
-  const navigate = useNavigate();
-
+  
   useEffect(() => {
     fetchData();
   }, []);
@@ -157,79 +102,167 @@ const InventoryPage = () => {
     setVisibleCount(50);
   }, [selectedBrandDetail]);
 
-  const fetchData = async () => {
+  const getDaysToExpiration = (expiredDateStr) => {
+    if (!expiredDateStr) return null;
+    const exp = new Date(expiredDateStr);
+    const now = new Date();
+    exp.setHours(0,0,0,0);
+    now.setHours(0,0,0,0);
+    const diffTime = exp.getTime() - now.getTime();
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  };
+
+  const fetchData = async (showLoading = true) => {
     try {
-      setLoading(true);
-      const cats = await getCategories();
+      if (showLoading) setLoading(true);
+
+      const [cats, assets, damagedAssets, eqs, logs] = await Promise.all([
+        getCategories().catch(() => []),
+        getAssets('available').catch(() => []),
+        getAssets('damaged').catch(() => []),
+        getAllEquipments().catch(() => []),
+        getInventoryLogs().catch(() => [])
+      ]);
+
       setCategories(cats);
       
-      // Load Good Inventory
-      const savedBrands = localStorage.getItem('spil_category_brands');
-      let flatBrands = [];
-      if (savedBrands) {
-        const map = JSON.parse(savedBrands);
-        cats.forEach(cat => {
-          const catKey = (cat.name || '').toLowerCase();
-          const brands = map[catKey] || map[cat.id] || [];
-          brands.forEach(b => {
-            flatBrands.push({
-              ...b,
-              category_id: cat.id,
-              category_name: cat.name,
-              category_color: cat.color || '#3b82f6'
-            });
-          });
+      // Load Available Assets from Backend
+      setAvailableAssets(assets || []);
+      
+      // Group available assets into brandInventory format.
+      // SOURCE OF TRUTH: Only backend AssetInventory records create brand cards.
+      // localStorage is only used to enrich metadata (warranty, min_stock).
+      let map = {};
+      if (assets && Array.isArray(assets)) {
+        assets.forEach(asset => {
+          const baseModel = (asset.model_number || 'Standard');
+          const key = `${asset.category_id}_${(asset.brand || 'Tanpa Merk').toLowerCase()}_${baseModel.toLowerCase()}`;
+          if (!map[key]) {
+            map[key] = {
+              id: `b_${asset.category_id}_${asset.brand}_${baseModel}`,
+              category_id: asset.category_id,
+              category_name: asset.category?.name || 'Umum',
+              category_color: asset.category?.color || '#3b82f6',
+              brand: asset.brand || 'Tanpa Merk',
+              model_number: baseModel,
+              original_model: baseModel,
+              ac_type: 'in_out',
+              stock: 0,
+              asset_count: 0,
+              min_stock: 1,
+              warranty_months: 0,
+              purchase_date: null,
+              expired_date: null,
+              assets: []
+            };
+          }
+          const isAC = (asset.category?.name || '').toUpperCase().includes('AC');
+          if (isAC) {
+             if (!map[key].ac_base_ids) map[key].ac_base_ids = new Set();
+             let baseId = asset.asset_id || '';
+             if (baseId.endsWith('-IN')) baseId = baseId.replace('-IN', '');
+             if (baseId.endsWith('-OUT')) baseId = baseId.replace('-OUT', '');
+             map[key].ac_base_ids.add(baseId);
+             map[key].asset_count = map[key].ac_base_ids.size;
+          } else {
+             map[key].asset_count += 1;
+          }
+          map[key].assets.push(asset);
         });
       }
-      setBrandInventory(flatBrands);
 
-      // Load Damaged Inventory
-      const savedDamaged = localStorage.getItem('spil_damaged_inventory');
-      let localDamaged = savedDamaged ? JSON.parse(savedDamaged) : [];
+      // Set stock = asset_count for all items (backend is the source of truth for quantity)
+      Object.keys(map).forEach(key => {
+        map[key].stock = map[key].asset_count;
+      });
 
-      try {
-        const damagedAssets = await getAssets('damaged');
-        if (damagedAssets && Array.isArray(damagedAssets)) {
-          const apiDamaged = damagedAssets.map(a => ({
-            id: a.id,
-            asset_id: a.asset_id || a.name || `AST-${a.id}`,
-            brand: a.brand || 'Tanpa Merk',
-            model_number: a.model_number || 'Standard',
-            category_id: a.category_id,
-            category_name: a.category_name || 'Umum',
-            unassigned_at: a.updated_at || a.created_at || new Date().toISOString()
-          }));
-          
-          const existingIds = new Set(localDamaged.map(d => String(d.asset_id || d.id)));
-          apiDamaged.forEach(ad => {
-            if (!existingIds.has(String(ad.asset_id)) && !existingIds.has(String(ad.id))) {
-              localDamaged.push(ad);
-            }
+      // Enrich with metadata from localStorage (warranty, min_stock only — do NOT add new cards)
+      const localBrands = localStorage.getItem('spil_category_brands');
+      if (localBrands) {
+        try {
+          const parsedBrands = JSON.parse(localBrands);
+          Object.keys(parsedBrands).forEach(catNameKey => {
+            parsedBrands[catNameKey].forEach(b => {
+              const cat = cats.find(c => c.id === b.category_id || (c.name || '').toLowerCase() === catNameKey);
+              const catId = b.category_id || (cat ? cat.id : catNameKey);
+              const baseModel = b.model_number || 'Standard';
+              const key = `${catId}_${(b.brand || 'Tanpa Merk').toLowerCase()}_${baseModel.toLowerCase()}`;
+              // Only enrich existing backend-sourced entries — do NOT create new ones
+              if (map[key]) {
+                map[key].min_stock = Math.max(map[key].min_stock, parseInt(b.min_stock) || 0);
+                map[key].warranty_months = Math.max(map[key].warranty_months, parseInt(b.warranty_months) || 0);
+              }
+            });
           });
+        } catch (err) {
+          console.error("Failed to parse spil_category_brands", err);
         }
-      } catch (err) {
-        console.log("Could not fetch API damaged assets:", err);
+      }
+
+      const sortedBrandInventory = Object.values(map).sort((a, b) => {
+        const catCmp = (a.category_name || '').localeCompare(b.category_name || '');
+        if (catCmp !== 0) return catCmp;
+        const brandCmp = (a.brand || '').localeCompare(b.brand || '');
+        if (brandCmp !== 0) return brandCmp;
+        return (a.model_number || '').localeCompare(b.model_number || '');
+      });
+      
+      setBrandInventory(sortedBrandInventory);
+
+      // Load Damaged Inventory from Backend
+      let localDamaged = [];
+      if (damagedAssets && Array.isArray(damagedAssets)) {
+        localDamaged = damagedAssets.map(a => ({
+          id: a.id,
+          asset_id: a.asset_id || a.name || `AST-${a.id}`,
+          brand: a.brand || 'Tanpa Merk',
+          model_number: a.model_number || 'Standard',
+          category_id: a.category_id,
+          category_name: a.category?.name || 'Umum',
+          category_color: a.category?.color || '#3b82f6',
+          unassigned_at: a.updated_at || a.created_at || new Date().toISOString(),
+          is_local: false
+        }));
+      }
+
+      // Merge local storage spil_damaged_inventory
+      const localDamagedStr = localStorage.getItem('spil_damaged_inventory');
+      if (localDamagedStr) {
+        try {
+          const parsedDamaged = JSON.parse(localDamagedStr);
+          parsedDamaged.forEach(d => {
+            const cat = cats.find(c => c.id === d.category_id || (c.name || '').toLowerCase() === (d.category_name || '').toLowerCase());
+            localDamaged.push({
+              id: d.id || `local_dmg_${Date.now()}_${Math.random()}`,
+              asset_id: d.asset_id || d.name || `Barang-${Math.floor(Math.random()*1000)}`,
+              brand: d.brand || 'Tanpa Merk',
+              model_number: d.model_number || 'Standard',
+              category_id: d.category_id || (cat ? cat.id : null),
+              category_name: d.category_name || cat?.name || 'Umum',
+              category_color: cat?.color || '#f59e0b',
+              unassigned_at: d.unassigned_at || new Date().toISOString(),
+              is_local: true,
+              original_local_data: d
+            });
+          });
+        } catch (err) {
+          console.error("Failed to parse spil_damaged_inventory", err);
+        }
       }
 
       setDamagedInventory(localDamaged);
       
       // Load Active Equipments
-      const eqs = await getAllEquipments();
       setActiveEquipments(eqs || []);
       
       // Load History Logs
-      const logs = await getInventoryLogs();
       setInventoryLogs(logs || []);
-      
-      // Load Available Assets
-      const assets = await getAssets('available');
-      setAvailableAssets(assets || []);
       
     } catch (e) {
       console.error(e);
       showToast('Gagal memuat data inventori', 'error');
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
@@ -277,7 +310,7 @@ const InventoryPage = () => {
       }
       setShowAddCategoryModal(false);
       setEditingCategoryModal(null);
-      fetchData();
+      fetchData(false);
     } catch (err) {
       showToast('Gagal menyimpan kategori', 'error');
     }
@@ -303,7 +336,7 @@ const InventoryPage = () => {
       await deleteCategory(catToBlock.id);
       showToast('Kategori berhasil dihapus!', 'success');
       setConfirmDeleteCategory(null);
-      fetchData();
+      fetchData(false);
     } catch (err) {
       setConfirmDeleteCategory(null);
       setCategoryBlockedNotice(catToBlock);
@@ -316,7 +349,10 @@ const InventoryPage = () => {
       model_number: '',
       stock: '1',
       min_stock: '1',
-      warranty_months: '0'
+      warranty_months: 0,
+      purchase_date: '',
+      expired_date: '',
+      ac_type: 'in_out'
     });
     setShowAddBrandModal(true);
   };
@@ -333,66 +369,18 @@ const InventoryPage = () => {
     }
 
     try {
-      const saved = localStorage.getItem('spil_category_brands');
-      let map = saved ? JSON.parse(saved) : {};
-
-      const catKey = (selectedCategoryView.name || '').toLowerCase();
-      const catId = selectedCategoryView.id;
-      const currentBrands = map[catKey] || map[catId] || [];
-
-      const newBrandItem = {
-        id: 'b_' + Date.now(),
+      const stock = parseInt(brandForm.stock) || 1;
+      await addStockToInventory({
+        category_id: selectedCategoryView.id,
         brand: brandForm.brand.trim(),
         model_number: brandForm.model_number.trim() || 'Standard',
-        stock: parseInt(brandForm.stock) || 0,
-        min_stock: parseInt(brandForm.min_stock) || 0,
-        warranty_months: parseInt(brandForm.warranty_months) || 0
-      };
+        quantity: stock,
+        ac_type: (selectedCategoryView.name || '').toUpperCase().includes('AC') ? brandForm.ac_type : undefined
+      });
 
-      const updatedBrands = [...currentBrands, newBrandItem];
-      map[catKey] = updatedBrands;
-      if (catId) map[catId] = updatedBrands;
-
-      localStorage.setItem('spil_category_brands', JSON.stringify(map));
-
-      // Record Activity Log for adding new stock item
-      if (newBrandItem.stock > 0) {
-        let apiSuccess = false;
-        try {
-          await addStockToInventory({
-            category_id: selectedCategoryView.id,
-            brand: newBrandItem.brand,
-            model_number: newBrandItem.model_number,
-            quantity: newBrandItem.stock
-          });
-          apiSuccess = true;
-        } catch (apiErr) {
-          console.log("Backend API addStock notice:", apiErr);
-        }
-
-        if (!apiSuccess) {
-          const savedLogs = localStorage.getItem('spil_local_logs');
-          const localLogs = savedLogs ? JSON.parse(savedLogs) : [];
-          localLogs.unshift({
-            id: 'log_' + Date.now(),
-            category_id: selectedCategoryView.id,
-            category_name: selectedCategoryView.name,
-            category: { id: selectedCategoryView.id, name: selectedCategoryView.name },
-            brand: newBrandItem.brand,
-            model_number: newBrandItem.model_number,
-            action_type: 'add_stock',
-            quantity: newBrandItem.stock,
-            status: 'Siap Pakai',
-            location_info: `Stok Masuk Gudang (${selectedCategoryView.name})`,
-            created_at: new Date().toISOString()
-          });
-          localStorage.setItem('spil_local_logs', JSON.stringify(localLogs));
-        }
-      }
-
-      showToast(`Berhasil menambah barang ${newBrandItem.brand}!`, 'success');
+      showToast(`Berhasil menambah barang ${brandForm.brand.trim()}!`, 'success');
       setShowAddBrandModal(false);
-      fetchData();
+      fetchData(false);
     } catch (err) {
       console.error(err);
       showToast('Gagal menambahkan barang', 'error');
@@ -401,66 +389,113 @@ const InventoryPage = () => {
 
 
 
+  const handleQuickAddStock = async (item, e) => {
+    e.stopPropagation();
+    
+    const isAC = (item.category_name || '').toUpperCase().includes('AC');
+    if (isAC) {
+      setAddStockModal(item);
+      setStockToAdd(1);
+      setAcType(item.ac_type || 'in_out');
+      return;
+    }
+
+    try {
+      await addStockToInventory({
+        category_id: item.category_id,
+        brand: item.brand,
+        model_number: item.original_model || item.model_number || 'Standard',
+        quantity: 1,
+        ac_type: (item.category_name || '').toUpperCase().includes('AC') ? (item.ac_type || 'in_out') : undefined
+      });
+      
+      // Sync local storage
+      const localBrandsStr = localStorage.getItem('spil_category_brands');
+      if (localBrandsStr) {
+        try {
+          const parsed = JSON.parse(localBrandsStr);
+          const catKey = (item.category_name || '').toLowerCase();
+          if (parsed[catKey]) {
+            const existingBrand = parsed[catKey].find(b => 
+              (b.brand || '').toLowerCase() === (item.brand || '').toLowerCase() &&
+              (b.model_number || '').toLowerCase() === (item.original_model || item.model_number || '').toLowerCase()
+            );
+            if (existingBrand) {
+              existingBrand.stock = (parseInt(existingBrand.stock) || 0) + 1;
+              localStorage.setItem('spil_category_brands', JSON.stringify(parsed));
+            }
+          }
+        } catch(e) {}
+      }
+      
+      showToast(`1 Stok ${item.brand || ''} berhasil ditambahkan`, 'success');
+      fetchData(false);
+    } catch (err) {
+      showToast('Gagal menambah stok', 'error');
+    }
+  };
+
+  const handleQuickReduceStock = async (item, e) => {
+    e.stopPropagation();
+    if (item.stock <= 0) return;
+    try {
+      const result = await deleteOneAssetByBrand({
+        category_id: item.category_id,
+        brand: item.brand === 'Tanpa Merk' ? undefined : item.brand,
+        model_number: item.model_number === 'Standard' ? undefined : item.model_number,
+      });
+
+      if (result.deleted > 0) {
+        showToast(`1 Stok ${item.brand || ''} berhasil dikurangi`, 'success');
+        fetchData(false);
+      } else {
+        showToast('Tidak ada stok tersedia untuk dikurangi', 'warning');
+      }
+    } catch (err) {
+      const errMsg = Array.isArray(err.response?.data?.detail) 
+        ? err.response.data.detail.map(d => d.msg).join(', ') 
+        : (err.response?.data?.detail || err.message);
+      showToast('Gagal mengurangi stok: ' + errMsg, 'error');
+    }
+  };
+
+
   const handleAddStockSubmit = async (e) => {
     e.preventDefault();
     if (!addStockModal || stockToAdd <= 0) return;
     
     try {
-      let apiSuccess = false;
-      try {
-        await addStockToInventory({
-          category_id: addStockModal.category_id,
-          brand: addStockModal.brand,
-          model_number: addStockModal.model_number || 'Standard',
-          quantity: parseInt(stockToAdd)
-        });
-        apiSuccess = true;
-      } catch (apiErr) {
-        console.log("API add stock notice:", apiErr);
+      await addStockToInventory({
+        category_id: addStockModal.category_id,
+        brand: addStockModal.brand,
+        model_number: addStockModal.original_model || addStockModal.model_number || 'Standard',
+        quantity: parseInt(stockToAdd),
+        ac_type: (addStockModal.category_name || '').toUpperCase().includes('AC') ? acType : undefined
+      });
+      
+      // Update local storage to keep it in sync
+      const localBrandsStr = localStorage.getItem('spil_category_brands');
+      if (localBrandsStr) {
+        try {
+          const parsed = JSON.parse(localBrandsStr);
+          const catKey = (addStockModal.category_name || '').toLowerCase();
+          if (parsed[catKey]) {
+            const existingBrand = parsed[catKey].find(b => 
+              (b.brand || '').toLowerCase() === (addStockModal.brand || '').toLowerCase() &&
+              (b.model_number || '').toLowerCase() === (addStockModal.original_model || addStockModal.model_number || '').toLowerCase()
+            );
+            if (existingBrand) {
+              existingBrand.stock = (parseInt(existingBrand.stock) || 0) + parseInt(stockToAdd);
+              localStorage.setItem('spil_category_brands', JSON.stringify(parsed));
+            }
+          }
+        } catch(e) {}
       }
       
-      const saved = localStorage.getItem('spil_category_brands');
-      if (saved) {
-        const map = JSON.parse(saved);
-        const catKey = (addStockModal.category_name || '').toLowerCase();
-        const catBrands = map[catKey] || map[addStockModal.category_id] || [];
-        
-        const updatedBrands = catBrands.map(b => {
-          if (b.id === addStockModal.id || (b.brand === addStockModal.brand && b.model_number === addStockModal.model_number)) {
-            return { ...b, stock: (parseInt(b.stock) || 0) + parseInt(stockToAdd) };
-          }
-          return b;
-        });
-        
-        map[catKey] = updatedBrands;
-        if (addStockModal.category_id) map[addStockModal.category_id] = updatedBrands;
-        localStorage.setItem('spil_category_brands', JSON.stringify(map));
-      }
-
-      // Record Activity Log into spil_local_logs ONLY if API did not record it
-      if (!apiSuccess) {
-        const savedLogs = localStorage.getItem('spil_local_logs');
-        const localLogs = savedLogs ? JSON.parse(savedLogs) : [];
-        localLogs.unshift({
-          id: 'log_' + Date.now(),
-          category_id: addStockModal.category_id,
-          category_name: addStockModal.category_name,
-          category: { id: addStockModal.category_id, name: addStockModal.category_name },
-          brand: addStockModal.brand,
-          model_number: addStockModal.model_number || 'Standard',
-          action_type: 'add_stock',
-          quantity: parseInt(stockToAdd),
-          status: 'Siap Pakai',
-          location_info: `Stok Masuk Gudang (${addStockModal.category_name || 'Siap Pakai'})`,
-          created_at: new Date().toISOString()
-        });
-        localStorage.setItem('spil_local_logs', JSON.stringify(localLogs));
-      }
-
       showToast(`Berhasil menambah ${stockToAdd} stok untuk ${addStockModal.brand}`, 'success');
       setAddStockModal(null);
       setStockToAdd(1);
-      fetchData();
+      fetchData(false);
     } catch (err) {
       console.error(err);
       showToast('Gagal menambah stok', 'error');
@@ -469,112 +504,96 @@ const InventoryPage = () => {
 
   const handleRestoreDamaged = async (item) => {
     try {
-      // Call backend API to restore asset status to available and increment category stock
-      try {
+      if (item.is_local) {
+        // Remove from spil_damaged_inventory
+        const localDamagedStr = localStorage.getItem('spil_damaged_inventory');
+        if (localDamagedStr) {
+          try {
+            const parsed = JSON.parse(localDamagedStr);
+            const originalData = item.original_local_data;
+            const updatedDamaged = parsed.filter(d => 
+              !(d.category_id === originalData.category_id && 
+                d.brand === originalData.brand && 
+                d.model_number === originalData.model_number && 
+                d.unassigned_at === originalData.unassigned_at)
+            );
+            localStorage.setItem('spil_damaged_inventory', JSON.stringify(updatedDamaged));
+          } catch(e) { console.error(e) }
+        }
+        
+        // Add back to spil_category_brands
+        const localBrandsStr = localStorage.getItem('spil_category_brands');
+        if (localBrandsStr) {
+          try {
+            const parsed = JSON.parse(localBrandsStr);
+            const catKey = (item.category_name || '').toLowerCase();
+            if (!parsed[catKey]) parsed[catKey] = [];
+            
+            const existingBrand = parsed[catKey].find(b => 
+              (b.brand || '').toLowerCase() === (item.brand || '').toLowerCase() &&
+              (b.model_number || '').toLowerCase() === (item.model_number || '').toLowerCase()
+            );
+            
+            if (existingBrand) {
+              existingBrand.stock = (parseInt(existingBrand.stock) || 0) + 1;
+            } else {
+              parsed[catKey].push({
+                id: `b_${Date.now()}`,
+                category_id: item.category_id,
+                brand: item.brand,
+                model_number: item.model_number,
+                stock: 1,
+                min_stock: 1,
+                warranty_months: 0
+              });
+            }
+            localStorage.setItem('spil_category_brands', JSON.stringify(parsed));
+          } catch(e) { console.error(e) }
+        }
+      } else {
         await restoreAsset({
-          asset_id: item.asset_id || item.id || 'Asset',
+          asset_id: item.asset_id || item.id,
           category_id: item.category_id,
           brand: item.brand,
           model_number: item.model_number
         });
-      } catch (err) {
-        console.log('Backend restore endpoint error:', err);
       }
-
-      const savedBrands = localStorage.getItem('spil_category_brands');
-      let map = savedBrands ? JSON.parse(savedBrands) : {};
-      const catKey = (item.category_name || '').toLowerCase();
-      let catBrands = map[catKey] || map[item.category_id] || [];
-      
-      let found = false;
-      const updatedBrands = catBrands.map(b => {
-        if ((b.brand || '').toLowerCase() === (item.brand || '').toLowerCase() && (b.model_number || '').toLowerCase() === (item.model_number || '').toLowerCase()) {
-          found = true;
-          return { ...b, stock: (parseInt(b.stock) || 0) + 1 };
-        }
-        return b;
-      });
-      
-      if (!found && item.brand) {
-        updatedBrands.push({
-          id: 'b_' + Date.now(),
-          brand: item.brand,
-          model_number: item.model_number || 'Standard',
-          stock: 1,
-          min_stock: 1,
-          warranty_months: 0
-        });
-      }
-      
-      map[catKey] = updatedBrands;
-      if (item.category_id) map[item.category_id] = updatedBrands;
-      localStorage.setItem('spil_category_brands', JSON.stringify(map));
-      
-      const newDamaged = damagedInventory.filter(d => d.id !== item.id && d.asset_id !== item.asset_id);
-      localStorage.setItem('spil_damaged_inventory', JSON.stringify(newDamaged));
-      
-      // Save history log entry for repair
-      try {
-        const savedLogs = localStorage.getItem('spil_local_history_logs');
-        const localLogs = savedLogs ? JSON.parse(savedLogs) : [];
-        localLogs.unshift({
-          id: 'log_' + Date.now(),
-          category_id: item.category_id,
-          category: { id: item.category_id, name: item.category_name, color: item.category_color || '#3a9542' },
-          asset_id: item.asset_id || item.brand || 'Item',
-          brand: item.brand,
-          model_number: item.model_number,
-          action_type: 'repair',
-          status: 'Siap Pakai (Hasil Perbaikan)',
-          building_name: item.building_name || 'Gudang Utama',
-          floor_name: item.floor_name || '-',
-          room_name: item.room_name || '-',
-          location_info: `Diperbaiki dari Gudang Rusak (${item.asset_id || item.brand}) -> Kembali ke Stok Siap Pakai`,
-          created_at: new Date().toISOString()
-        });
-        localStorage.setItem('spil_local_history_logs', JSON.stringify(localLogs));
-      } catch (e) { console.error('Local history log save error:', e); }
 
       showToast('Barang berhasil diperbaiki & masuk ke Siap Pakai', 'success');
-      await fetchData();
+      await fetchData(false);
     } catch (e) {
       console.error(e);
       showToast('Gagal memulihkan barang', 'error');
     }
   };
 
-  const handleDeleteDamagedConfirm = () => {
+  const handleDeleteDamagedConfirm = async () => {
     if (!confirmDeleteDamaged) return;
     try {
       const item = confirmDeleteDamaged;
-      const newDamaged = damagedInventory.filter(d => d.id !== item.id);
-      localStorage.setItem('spil_damaged_inventory', JSON.stringify(newDamaged));
-
-      // Save history log entry for discarded asset
-      try {
-        const savedLogs = localStorage.getItem('spil_local_history_logs');
-        const localLogs = savedLogs ? JSON.parse(savedLogs) : [];
-        localLogs.unshift({
-          id: 'log_' + Date.now(),
-          category_id: item.category_id,
-          category: { id: item.category_id, name: item.category_name, color: item.category_color || '#3a9542' },
-          asset_id: item.asset_id || item.brand || 'Item',
-          brand: item.brand,
-          model_number: item.model_number,
-          action_type: 'remove',
-          status: 'Dibuang / Off',
-          building_name: item.building_name || 'Gudang Utama',
-          floor_name: item.floor_name || '-',
-          room_name: item.room_name || '-',
-          location_info: `Dibuang permanen dari Gudang Rusak (${item.asset_id || item.brand})`,
-          created_at: new Date().toISOString()
-        });
-        localStorage.setItem('spil_local_history_logs', JSON.stringify(localLogs));
-      } catch (e) { console.error('Local history log save error:', e); }
+      
+      if (item.is_local) {
+        const localDamagedStr = localStorage.getItem('spil_damaged_inventory');
+        if (localDamagedStr) {
+          try {
+            const parsed = JSON.parse(localDamagedStr);
+            const originalData = item.original_local_data;
+            const updatedDamaged = parsed.filter(d => 
+              !(d.category_id === originalData.category_id && 
+                d.brand === originalData.brand && 
+                d.model_number === originalData.model_number && 
+                d.unassigned_at === originalData.unassigned_at)
+            );
+            localStorage.setItem('spil_damaged_inventory', JSON.stringify(updatedDamaged));
+          } catch(e) { console.error(e) }
+        }
+      } else {
+        await deleteAsset(item.id);
+      }
 
       showToast('Barang rusak berhasil dibuang', 'success');
       setConfirmDeleteDamaged(null);
-      fetchData();
+      fetchData(false);
     } catch (e) {
       console.error(e);
       showToast('Gagal membuang barang', 'error');
@@ -608,7 +627,7 @@ const InventoryPage = () => {
   }
 
   return (
-    <div style={{ padding: '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
+    <div className="mobile-p-sm" style={{ padding: '24px 32px', maxWidth: '1200px', margin: '0 auto' }}>
       {/* Header (Centered Title with Spacious Layout) */}
       <div style={{ marginBottom: '32px' }}>
         <button 
@@ -644,9 +663,10 @@ const InventoryPage = () => {
       </div>
 
       {/* Action Row: Tabs (Left) & Search + Tambah Kategori (Right, Sejajar) */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
-        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="mobile-col" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+        <div className="mobile-col mobile-w-full" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
           <button 
+            className="mobile-w-full mobile-text-center"
             onClick={() => { setActiveTab('good'); setSelectedCategoryView(null); }}
             style={{
               padding: '12px 24px',
@@ -669,6 +689,7 @@ const InventoryPage = () => {
           </button>
 
           <button 
+            className="mobile-w-full mobile-text-center"
             onClick={() => { setActiveTab('damaged'); setSelectedCategoryView(null); }}
             style={{
               padding: '12px 24px',
@@ -692,8 +713,8 @@ const InventoryPage = () => {
         </div>
 
         {/* Right Side: Search Input + Tambah Kategori Button (Sejajar & Rata Tengah Vertikal) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', padding: '0 14px', borderRadius: '12px', background: '#ffffff', border: '1.5px solid #cbd5e1', width: '280px', height: '44px', boxSizing: 'border-box', boxShadow: '0 2px 6px rgba(0,0,0,0.04)' }}>
+        <div className="mobile-col mobile-w-full" style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <div className="mobile-w-full" style={{ display: 'flex', alignItems: 'center', padding: '0 14px', borderRadius: '12px', background: '#ffffff', border: '1.5px solid #cbd5e1', width: '280px', height: '44px', boxSizing: 'border-box', boxShadow: '0 2px 6px rgba(0,0,0,0.04)' }}>
             <Search size={18} color="#64748b" style={{ marginRight: '8px', flexShrink: 0 }} />
             <input 
               type="text"
@@ -704,10 +725,10 @@ const InventoryPage = () => {
             />
           </div>
 
-          {(activeTab === 'good' && !selectedCategoryView) && (
+          {(isAdmin && activeTab === 'good' && !selectedCategoryView) && (
             <button
               onClick={handleOpenAddCategoryModal}
-              className="neu-action-btn"
+              className="neu-action-btn mobile-w-full mobile-text-center"
               style={{
                 height: '44px',
                 padding: '0 22px',
@@ -733,13 +754,13 @@ const InventoryPage = () => {
       </div>
 
       {/* Content Area */}
-      <div className="neu-inset" style={{ padding: '24px', borderRadius: '18px', background: 'rgba(255,255,255,0.6)', border: '1px solid #e2e8f0', minHeight: '400px' }}>
+      <div className="neu-inset mobile-p-sm" style={{ padding: '24px', borderRadius: '18px', background: 'rgba(255,255,255,0.6)', border: '1px solid #e2e8f0', minHeight: '400px' }}>
         
         {(activeTab === 'category' || activeTab === 'good') && (
           <div>
             {!selectedCategoryView ? (
               // CATEGORY GRID VIEW (Bold, Crisp & Prominent!)
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: '20px' }}>
+              <div className="mobile-grid-1" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: '20px' }}>
                 {categories.map(cat => {
                   const catBrands = brandInventory.filter(b => String(b.category_id) === String(cat.id) || (b.category_name || '').toLowerCase() === (cat.name || '').toLowerCase());
                   const totalStock = catBrands.reduce((acc, b) => acc + (parseInt(b.stock) || 0), 0);
@@ -799,46 +820,57 @@ const InventoryPage = () => {
                             }}>
                               {totalStock} Total Stok
                             </span>
+                            {catBrands.some(b => b.stock <= (b.min_stock || 0)) && (
+                              <span style={{ 
+                                padding: '4px 10px', borderRadius: '8px', fontSize: '0.82rem', fontWeight: '800',
+                                background: 'rgba(239, 68, 68, 0.12)', color: '#dc2626', border: '1px solid rgba(239, 68, 68, 0.3)',
+                                display: 'flex', alignItems: 'center', gap: '4px'
+                              }} title="Ada barang yang stoknya kurang dari atau sama dengan minimum stok!">
+                                <AlertTriangle size={14} /> Stok Minim
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
 
-                      {/* Action edit/delete */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={e => e.stopPropagation()}>
-                        <button 
-                          onClick={(e) => handleOpenEditCategoryModal(cat, e)}
-                          style={{ 
-                            padding: '7px 9px', color: '#b45309', background: 'rgba(245, 158, 11, 0.12)', 
-                            border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '8px', cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center' 
-                          }}
-                          title="Edit Kategori"
-                        >
-                          <Edit2 size={16} color="#b45309" />
-                        </button>
-                        <button 
-                          onClick={(e) => { 
-                            e.stopPropagation();
-                            const isUsed = activeEquipments.some(eq => 
-                              String(eq.category_id || eq.category?.id) === String(cat.id) || 
-                              (eq.category_name || '').toLowerCase() === (cat.name || '').toLowerCase()
-                            );
-                            if (isUsed) {
-                              setCategoryBlockedNotice(cat);
-                            } else {
-                              setConfirmDeleteCategory(cat);
-                            }
-                          }}
-                          style={{ 
-                            padding: '7px 9px', color: '#dc2626', background: 'rgba(239, 68, 68, 0.12)', 
-                            border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center' 
-                          }}
-                          title="Hapus Kategori"
-                        >
-                          <Trash2 size={16} color="#dc2626" />
-                        </button>
-                      </div>
+                      {/* Action edit/delete - Admin Only */}
+                      {isAdmin && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={e => e.stopPropagation()}>
+                          <button 
+                            onClick={(e) => handleOpenEditCategoryModal(cat, e)}
+                            style={{ 
+                              padding: '7px 9px', color: '#b45309', background: 'rgba(245, 158, 11, 0.12)', 
+                              border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '8px', cursor: 'pointer',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center' 
+                            }}
+                            title="Edit Kategori"
+                          >
+                            <Edit2 size={16} color="#b45309" />
+                          </button>
+                          <button 
+                            onClick={(e) => { 
+                              e.stopPropagation();
+                              const isUsed = activeEquipments.some(eq => 
+                                String(eq.category_id || eq.category?.id) === String(cat.id) || 
+                                (eq.category_name || '').toLowerCase() === (cat.name || '').toLowerCase()
+                              );
+                              if (isUsed) {
+                                setCategoryBlockedNotice(cat);
+                              } else {
+                                setConfirmDeleteCategory(cat);
+                              }
+                            }}
+                            style={{ 
+                              padding: '7px 9px', color: '#dc2626', background: 'rgba(239, 68, 68, 0.12)', 
+                              border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', cursor: 'pointer',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center' 
+                            }}
+                            title="Hapus Kategori"
+                          >
+                            <Trash2 size={16} color="#dc2626" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -861,27 +893,29 @@ const InventoryPage = () => {
                     </h3>
                   </div>
 
-                  <button
-                    onClick={handleOpenAddBrandModal}
-                    className="neu-action-btn"
-                    style={{
-                      padding: '8px 16px',
-                      borderRadius: '10px',
-                      background: 'var(--color-primary)',
-                      color: 'white',
-                      border: 'none',
-                      cursor: 'pointer',
-                      fontWeight: '700',
-                      fontSize: '0.85rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      boxShadow: '0 4px 10px rgba(58, 149, 66, 0.2)'
-                    }}
-                  >
-                    <Plus size={16} />
-                    <span>Tambah Barang / Merk Baru</span>
-                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={handleOpenAddBrandModal}
+                      className="neu-action-btn"
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '10px',
+                        background: 'var(--color-primary)',
+                        color: 'white',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontWeight: '700',
+                        fontSize: '0.85rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        boxShadow: '0 4px 10px rgba(58, 149, 66, 0.2)'
+                      }}
+                    >
+                      <Plus size={16} />
+                      <span>Tambah Barang / Merk Baru</span>
+                    </button>
+                  )}
                 </div>
 
                 {filteredGood.filter(b => String(b.category_id) === String(selectedCategoryView.id) || (b.category_name || '').toLowerCase() === (selectedCategoryView.name || '').toLowerCase()).length === 0 ? (
@@ -910,7 +944,7 @@ const InventoryPage = () => {
                     </button>
                   </div>
                 ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
+                  <div className="mobile-grid-1" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
                     {filteredGood.filter(b => String(b.category_id) === String(selectedCategoryView.id) || (b.category_name || '').toLowerCase() === (selectedCategoryView.name || '').toLowerCase()).map(item => {
                       const isLowStock = item.stock <= (item.min_stock || 0);
                       return (
@@ -965,6 +999,7 @@ const InventoryPage = () => {
                                 <span style={{ fontSize: '0.68rem', fontWeight: '900', letterSpacing: '0.5px' }}>STOK</span>
                                 <span style={{ fontSize: '1.3rem', fontWeight: '900' }}>{item.stock}</span>
                               </div>
+                            {isAdmin && (
                               <button
                                 type="button"
                                 onClick={(e) => handleDeleteBrand(item, e)}
@@ -984,6 +1019,7 @@ const InventoryPage = () => {
                               >
                                 <Trash2 size={16} color="#dc2626" />
                               </button>
+                            )}
                             </div>
                           </div>
                           
@@ -996,18 +1032,57 @@ const InventoryPage = () => {
                             </div>
                           </div>
 
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); setAddStockModal(item); }}
-                            style={{ 
-                              width: '100%', padding: '12px', borderRadius: '10px', 
-                              background: '#15803d', color: 'white', border: 'none',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-                              fontWeight: '800', fontSize: '0.9rem', cursor: 'pointer',
-                              boxShadow: '0 4px 12px rgba(21, 128, 61, 0.25)'
-                            }}
-                          >
-                            <Plus size={18} /> Tambah Stok
-                          </button>
+                          {isAdmin && (
+                            <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setAddStockModal(item); setAcType(item.ac_type || 'in_out'); }}
+                                style={{ 
+                                  flex: 1, padding: '10px', borderRadius: '10px', 
+                                  background: '#f8fafc', color: '#475569', border: '1px solid #e2e8f0',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                                  fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer',
+                                  transition: 'all 0.2s',
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = '#f8fafc'}
+                                title="Input manual banyak stok sekaligus"
+                              >
+                                <Plus size={16} /> Stok Masal
+                              </button>
+
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <button
+                                  onClick={(e) => handleQuickReduceStock(item, e)}
+                                  disabled={item.stock <= 0}
+                                  style={{ 
+                                    width: '42px', height: '100%', borderRadius: '10px', 
+                                    background: item.stock <= 0 ? '#f8fafc' : '#fee2e2', 
+                                    color: item.stock <= 0 ? '#cbd5e1' : '#ef4444', 
+                                    border: item.stock <= 0 ? '1px solid #e2e8f0' : 'none',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                                    cursor: item.stock <= 0 ? 'not-allowed' : 'pointer',
+                                    transition: 'all 0.2s',
+                                  }}
+                                  title="Kurangi 1 Stok"
+                                >
+                                  <Minus size={18} />
+                                </button>
+                                
+                                <button 
+                                  onClick={(e) => handleQuickAddStock(item, e)}
+                                  style={{ 
+                                    width: '42px', height: '100%', borderRadius: '10px', 
+                                    background: '#dcfce7', color: '#22c55e', border: 'none',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                                    cursor: 'pointer', transition: 'all 0.2s',
+                                  }}
+                                  title="Tambah 1 Stok"
+                                >
+                                  <Plus size={18} />
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -1128,6 +1203,11 @@ const InventoryPage = () => {
                             <div>
                               <strong style={{ display: 'block', color: 'var(--color-text-primary)' }}>
                                 {it.name || it.asset_id || it.id}
+                                {it.ac_type && it.ac_type !== 'in_out' ? (
+                                  <span style={{ marginLeft: '8px', padding: '2px 6px', background: 'var(--color-primary)', color: 'white', fontSize: '0.7rem', borderRadius: '4px' }}>
+                                    {it.ac_type.toUpperCase()}
+                                  </span>
+                                ) : null}
                               </strong>
                               <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', display: 'block' }}>
                                 Ditambahkan/Diubah: {new Date(it.placed_at || it.unassigned_at || it.date || it.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
@@ -1177,7 +1257,7 @@ const InventoryPage = () => {
                 <p>Tidak ada barang rusak di inventori saat ini.</p>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
+              <div className="mobile-grid-1" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
                 {filteredDamaged.map(item => (
                   <div key={item.id} className="neu-raised-sm" style={{ padding: '16px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '12px', background: 'var(--color-bg)', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
@@ -1315,6 +1395,23 @@ const InventoryPage = () => {
                 />
               </div>
 
+              { (selectedCategoryView?.name || '').toUpperCase().includes('AC') && (
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--color-text)' }}>
+                    Bagian AC yang ditambahkan
+                  </label>
+                  <select
+                    value={brandForm.ac_type}
+                    onChange={(e) => setBrandForm({ ...brandForm, ac_type: e.target.value })}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '0.95rem', outline: 'none', background: 'var(--color-bg)', color: 'var(--color-text)' }}
+                  >
+                    <option value="in_out">Keduanya (Unit Dalam & Kompresor)</option>
+                    <option value="in">Hanya Unit Dalam (IN)</option>
+                    <option value="out">Hanya Kompresor (OUT)</option>
+                  </select>
+                </div>
+              )}
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
                   <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--color-text)' }}>
@@ -1343,18 +1440,45 @@ const InventoryPage = () => {
                 </div>
               </div>
 
-              <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--color-text)' }}>
-                  Masa Garansi (Bulan)
-                </label>
-                <input 
-                  type="number" 
-                  min="0"
-                  placeholder="Contoh: 12, 24, 36 (0 jika tanpa garansi)"
-                  value={brandForm.warranty_months}
-                  onChange={(e) => setBrandForm({ ...brandForm, warranty_months: e.target.value })}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '0.95rem', outline: 'none' }}
-                />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--color-text)' }}>
+                    Masa Garansi (Bulan)
+                  </label>
+                  <input 
+                    type="number" 
+                    min="0"
+                    placeholder="0 jika tanpa garansi"
+                    value={brandForm.warranty_months}
+                    onChange={(e) => setBrandForm({ ...brandForm, warranty_months: e.target.value })}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '0.95rem', outline: 'none', boxSizing: 'border-box' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--color-text)' }}>
+                    Tanggal Pembelian
+                  </label>
+                  <input 
+                    type="date" 
+                    value={brandForm.purchase_date}
+                    onChange={(e) => setBrandForm({ ...brandForm, purchase_date: e.target.value })}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '0.95rem', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: '600', color: 'var(--color-text)' }}>
+                    Tanggal Kedaluwarsa (Opsional)
+                  </label>
+                  <input 
+                    type="date" 
+                    value={brandForm.expired_date || ''}
+                    onChange={(e) => setBrandForm({ ...brandForm, expired_date: e.target.value })}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '0.95rem', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' }}
+                  />
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '10px' }}>
@@ -1403,13 +1527,40 @@ const InventoryPage = () => {
                 <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text)' }}>
                   Warna Penanda
                 </label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
+                  {[
+                    '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', 
+                    '#22c55e', '#10b981', '#14b8a6', '#0ea5e9', '#3b82f6', 
+                    '#6366f1', '#8b5cf6', '#d946ef', '#ec4899', '#64748b'
+                  ].map(c => (
+                    <div 
+                      key={c}
+                      onClick={() => setCatColor(c)}
+                      style={{
+                        width: '30px', height: '30px', borderRadius: '50%', backgroundColor: c,
+                        cursor: 'pointer',
+                        border: catColor === c ? '2px solid white' : '2px solid transparent',
+                        boxShadow: catColor === c ? `0 0 0 2px ${c}` : '0 2px 4px rgba(0,0,0,0.1)',
+                        transform: catColor === c ? 'scale(1.15)' : 'scale(1)',
+                        transition: 'all 0.2s ease'
+                      }}
+                      title={c}
+                    />
+                  ))}
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <input 
-                    type="color" 
-                    value={catColor}
-                    onChange={(e) => setCatColor(e.target.value)}
-                    style={{ width: '44px', height: '44px', padding: 0, border: 'none', borderRadius: '8px', cursor: 'pointer' }}
-                  />
+                  <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', fontWeight: '500' }}>Warna Kustom:</span>
+                  <div style={{ 
+                    width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', 
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)', border: '2px solid white'
+                  }}>
+                    <input 
+                      type="color" 
+                      value={catColor}
+                      onChange={(e) => setCatColor(e.target.value)}
+                      style={{ width: '150%', height: '150%', margin: '-25%', padding: 0, border: 'none', cursor: 'pointer' }}
+                    />
+                  </div>
                   <span style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', fontWeight: '600' }}>{catColor}</span>
                 </div>
               </div>
@@ -1461,19 +1612,37 @@ const InventoryPage = () => {
             
             <form onSubmit={handleAddStockSubmit}>
               <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text)' }}>
-                  Jumlah Stok Masuk
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', fontWeight: '500' }}>
+                  Jumlah Stok Baru
                 </label>
                 <input 
                   type="number" 
                   min="1"
                   value={stockToAdd}
                   onChange={(e) => setStockToAdd(e.target.value)}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '1rem', outline: 'none' }}
+                  style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '1rem', outline: 'none' }}
                   autoFocus
                   required
                 />
               </div>
+
+              {(addStockModal.category_name || '').toUpperCase().includes('AC') && (
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', fontWeight: '500' }}>
+                    Unit AC
+                  </label>
+                  <select
+                    value={acType}
+                    onChange={(e) => setAcType(e.target.value)}
+                    style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '1rem', outline: 'none', background: 'white' }}
+                  >
+                    <option value="in_out">Keduanya (Indoor + Outdoor)</option>
+                    <option value="in">Indoor Saja</option>
+                    <option value="out">Outdoor Saja</option>
+                  </select>
+                </div>
+              )}
+
               <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
                 <button type="button" onClick={() => setAddStockModal(null)} className="neu-action-btn" style={{ padding: '8px 16px', borderRadius: '8px', background: 'transparent', border: 'none', cursor: 'pointer' }}>Batal</button>
                 <button type="submit" className="neu-action-btn" style={{ padding: '8px 16px', borderRadius: '8px', background: 'var(--color-primary)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: '600' }}>Simpan Stok</button>

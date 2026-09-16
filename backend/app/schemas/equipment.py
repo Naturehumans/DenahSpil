@@ -13,8 +13,10 @@ class EquipmentBase(BaseModel):
     lifespan_months: Optional[int] = 0
     position_x: float
     position_y: float
-    status: Literal['active', 'warning', 'expired', 'replaced'] = 'active'
+    status: Literal['active', 'warning', 'expired', 'replaced', 'damaged'] = 'active'
     notes: Optional[str] = None
+    ac_in_asset_id: Optional[str] = None
+    ac_out_asset_id: Optional[str] = None
 
 class EquipmentCreate(EquipmentBase):
     category_id: uuid.UUID
@@ -26,7 +28,7 @@ class EquipmentUpdate(BaseModel):
     category_id: Optional[uuid.UUID] = None
     installation_date: Optional[date] = None
     lifespan_months: Optional[int] = None
-    status: Optional[Literal['active', 'warning', 'expired', 'replaced']] = None
+    status: Optional[Literal['active', 'warning', 'expired', 'replaced', 'damaged']] = None
     notes: Optional[str] = None
 
 class EquipmentPositionUpdate(BaseModel):

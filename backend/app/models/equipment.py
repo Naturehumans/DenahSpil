@@ -18,6 +18,9 @@ class Equipment(Base):
     brand = Column(String(100), nullable=True)
     model_number = Column(String(100), nullable=True)
     
+    ac_in_asset_id = Column(String(100), nullable=True)
+    ac_out_asset_id = Column(String(100), nullable=True)
+    
     installation_date = Column(Date, nullable=True, default=date.today)
     lifespan_months = Column(Integer, nullable=True, default=0)
     expiry_date = Column(Date, nullable=True, index=True)

@@ -161,7 +161,7 @@ from app.models.asset_inventory import AssetInventory
 from app.models.inventory_history_log import InventoryHistoryLog
 
 @router.delete("/equipments/{equipment_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_equipment(equipment_id: uuid.UUID, destination: str = None, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def delete_equipment(equipment_id: uuid.UUID, destination: str = None, action_date: str = None, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     from app.models.slot_template import SlotTemplate
     
     # Clear slot reference first if any slot is pointing to this equipment
@@ -184,6 +184,12 @@ async def delete_equipment(equipment_id: uuid.UUID, destination: str = None, db:
                 asset_id=equipment.name,
                 status='available' if destination == 'good' else 'damaged',
             )
+            if action_date:
+                from datetime import datetime
+                try:
+                    asset_inv.created_at = datetime.fromisoformat(action_date)
+                except ValueError:
+                    pass
             db.add(asset_inv)
             log = InventoryHistoryLog(
                 category_id=equipment.category_id,
@@ -192,15 +198,27 @@ async def delete_equipment(equipment_id: uuid.UUID, destination: str = None, db:
                 location_info="Ditarik dari denah (Barang lawas)",
                 performed_by=current_user.id
             )
+            if action_date:
+                from datetime import datetime
+                try:
+                    log.created_at = datetime.fromisoformat(action_date)
+                except ValueError:
+                    pass
             db.add(log)
         elif destination == 'discard':
             log = InventoryHistoryLog(
                 category_id=equipment.category_id,
                 asset_id=equipment.name,
                 action_type='remove',
-                location_info="Dibuang dari denah (Barang lawas)",
+                location_info="Dihapus permanen dari sistem",
                 performed_by=current_user.id
             )
+            if action_date:
+                from datetime import datetime
+                try:
+                    log.created_at = datetime.fromisoformat(action_date)
+                except ValueError:
+                    pass
             db.add(log)
     else:
         log = InventoryHistoryLog(

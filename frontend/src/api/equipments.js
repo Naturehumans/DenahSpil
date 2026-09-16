@@ -35,8 +35,16 @@ export const updateEquipmentPosition = async (equipmentId, position_x, position_
   return response.data;
 };
 
-export const deleteEquipment = async (equipmentId, destination) => {
-  const url = destination ? `/equipments/${equipmentId}?destination=${destination}` : `/equipments/${equipmentId}`;
+export const deleteEquipment = async (equipmentId, destination, actionDate) => {
+  let url = `/equipments/${equipmentId}`;
+  const params = new URLSearchParams();
+  if (destination) params.append('destination', destination);
+  if (actionDate) params.append('action_date', actionDate);
+  
+  if (params.toString()) {
+    url += `?${params.toString()}`;
+  }
+  
   const response = await api.delete(url);
   return response.data;
 };

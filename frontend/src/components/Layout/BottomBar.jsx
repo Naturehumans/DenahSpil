@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { Layers, Grid, Edit3, Clock, ChevronUp, ChevronDown, Box } from 'lucide-react';
-import Button from '../UI/Button';
+import { Layers, Edit3, Clock, ChevronUp, ChevronDown, Box } from 'lucide-react';
 
-const BottomBar = ({ isEditMode = false, onManageFloors, onManageCategories, onManageEquipments, onManageInventory, onManageHistory }) => {
+const BottomBar = ({ isEditMode = false, onManageFloors, onManageEquipments, onManageInventory, onManageHistory, isAdmin = true }) => {
   const [isVisible, setIsVisible] = useState(true);
 
   return (
@@ -51,65 +50,76 @@ const BottomBar = ({ isEditMode = false, onManageFloors, onManageCategories, onM
         background: 'rgba(250, 250, 250, 0.8)',
         backdropFilter: 'blur(8px)',
       }}>
-        
+
+        {/* Area - Admin Only */}
+        {isAdmin && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+            <button
+              className="neu-action-btn"
+              onClick={onManageFloors}
+              style={{
+                width: '48px', height: '48px', padding: 0,
+                borderRadius: '50%', background: 'transparent',
+                border: 'none',
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}>
+              <Layers size={20} color="#db2777" />
+            </button>
+            <span style={{ fontSize: '0.7rem', fontWeight: '600', color: 'var(--color-text-secondary)' }}>Area</span>
+          </div>
+        )}
+
+        {/* Barang / Edit Mode - Admin Only */}
+        {isAdmin && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+            <button
+              className="neu-action-btn"
+              onClick={onManageEquipments}
+              style={{
+                width: '48px', height: '48px', padding: 0,
+                borderRadius: '50%', border: 'none',
+                background: isEditMode ? 'var(--color-success)' : 'transparent',
+                boxShadow: isEditMode ? '0 0 15px rgba(34, 197, 94, 0.4)' : undefined,
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}>
+              <Edit3 size={20} color={isEditMode ? '#ffffff' : '#10b981'} />
+            </button>
+            <span style={{ fontSize: '0.7rem', fontWeight: '600', color: isEditMode ? 'var(--color-success)' : 'var(--color-text-secondary)' }}>
+              {isEditMode ? 'Edit Mode' : 'Barang'}
+            </span>
+          </div>
+        )}
+
+        {/* Inventori - Admin Only */}
+        {isAdmin && (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+              <button
+                className="neu-action-btn"
+                onClick={onManageInventory}
+                style={{
+                  width: '48px', height: '48px', padding: 0,
+                  borderRadius: '50%', background: 'transparent',
+                  border: 'none',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                <Box size={20} color="#8b5cf6" />
+              </button>
+              <span style={{ fontSize: '0.7rem', fontWeight: '600', color: 'var(--color-text-secondary)' }}>Inventori</span>
+            </div>
+
+            <div style={{ width: '2px', height: '32px', background: 'var(--color-text-muted)', opacity: 0.3, borderRadius: '2px' }}></div>
+          </>
+        )}
+
+        {/* History - Semua user */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-          <button 
+          <button
             className="neu-action-btn"
-            onClick={onManageFloors} 
-            style={{ 
-              width: '48px', height: '48px', padding: 0, 
-              borderRadius: '50%', background: 'transparent', 
-              border: 'none',
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}>
-            <Layers size={20} color="#db2777" />
-          </button>
-          <span style={{ fontSize: '0.7rem', fontWeight: '600', color: 'var(--color-text-secondary)' }}>Area</span>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-          <button 
-            className="neu-action-btn"
-            onClick={onManageEquipments} 
-            style={{ 
-              width: '48px', height: '48px', padding: 0, 
-              borderRadius: '50%', border: 'none',
-              background: isEditMode ? 'var(--color-success)' : 'transparent', 
-              boxShadow: isEditMode ? '0 0 15px rgba(34, 197, 94, 0.4)' : undefined, 
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}>
-            <Edit3 size={20} color={isEditMode ? '#ffffff' : '#10b981'} />
-          </button>
-          <span style={{ fontSize: '0.7rem', fontWeight: '600', color: isEditMode ? 'var(--color-success)' : 'var(--color-text-secondary)' }}>
-            {isEditMode ? 'Edit Mode' : 'Barang'}
-          </span>
-        </div>
-
-
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-          <button 
-            className="neu-action-btn"
-            onClick={onManageInventory} 
-            style={{ 
-              width: '48px', height: '48px', padding: 0, 
-              borderRadius: '50%', background: 'transparent', 
-              border: 'none',
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}>
-            <Box size={20} color="#8b5cf6" />
-          </button>
-          <span style={{ fontSize: '0.7rem', fontWeight: '600', color: 'var(--color-text-secondary)' }}>Inventori</span>
-        </div>
-
-        <div style={{ width: '2px', height: '32px', background: 'var(--color-text-muted)', opacity: 0.3, borderRadius: '2px' }}></div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-          <button 
-            className="neu-action-btn"
-            onClick={onManageHistory} 
-            style={{ 
-              width: '48px', height: '48px', padding: 0, 
-              borderRadius: '50%', background: 'transparent', 
+            onClick={onManageHistory}
+            style={{
+              width: '48px', height: '48px', padding: 0,
+              borderRadius: '50%', background: 'transparent',
               border: 'none',
               display: 'flex', alignItems: 'center', justifyContent: 'center'
             }}>

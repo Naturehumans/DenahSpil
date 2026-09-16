@@ -8,6 +8,7 @@ const SlotNode = ({
   isSelected, 
   isHighlighted = false,
   onSelect, 
+  onDragStart,
   onDragEnd, 
   isDraggable = true,
   scale = 1
@@ -26,13 +27,16 @@ const SlotNode = ({
 
   if (isFilled && slot.equipment) {
     const bgColor = color;
-    const eqLabel = slotLabel || slot.equipment.name || '?';
+    const eqLabel = slot._isGhost
+      ? (slot.equipment.name || slotLabel || '?')
+      : (slotLabel || slot.equipment.name || '?');
 
     return (
       <>
         {/* Static template circle — always stays in place, never moves */}
-        <Group
-          ref={templateGroupRef}
+        {!slot._isGhost && (
+          <Group
+            ref={templateGroupRef}
           x={slot.position_x}
           y={slot.position_y}
           scaleX={invertedScale}
@@ -61,9 +65,9 @@ const SlotNode = ({
             offsetX={21}
             offsetY={21}
             wrap="none"
-            perfectDrawEnabled={false}
           />
         </Group>
+        )}
 
         {/* Draggable equipment icon — only this part moves */}
         <Group
@@ -75,6 +79,7 @@ const SlotNode = ({
             isDraggingRef.current = true;
             dragStartTimeRef.current = Date.now();
             origPosRef.current = { x: slot.position_x, y: slot.position_y };
+            if (onDragStart) onDragStart(slot);
           }}
           onDragMove={(e) => {
             e.cancelBubble = true;
@@ -87,11 +92,29 @@ const SlotNode = ({
               e.target.opacity(0.7);
               if (templateGroupRef.current) templateGroupRef.current.opacity(0.7);
             }
+            
+            // Cross-floor hover detection
+            if (e.evt) {
+              const elem = document.elementFromPoint(e.evt.clientX, e.evt.clientY);
+              const hoverFloorId = elem ? elem.getAttribute('data-floor-id') : null;
+              const hoverBuildingId = elem ? elem.getAttribute('data-building-id') : null;
+              
+              if (hoverFloorId) {
+                window.dispatchEvent(new CustomEvent('konvaDragHoverFloor', { detail: hoverFloorId }));
+              } else if (hoverBuildingId) {
+                window.dispatchEvent(new CustomEvent('konvaDragHoverBuilding', { detail: hoverBuildingId }));
+              } else {
+                window.dispatchEvent(new CustomEvent('konvaDragHoverFloorEnd'));
+                window.dispatchEvent(new CustomEvent('konvaDragHoverBuildingEnd'));
+              }
+            }
           }}
           onDragEnd={(e) => {
             e.cancelBubble = true;
             const dropX = e.target.x();
             const dropY = e.target.y();
+            
+            window.dispatchEvent(new CustomEvent('konvaDragHoverFloorEnd'));
             
             // Always snap back
             e.target.position({ x: origPosRef.current.x, y: origPosRef.current.y });
@@ -177,9 +200,11 @@ const SlotNode = ({
       x={slot.position_x}
       y={slot.position_y}
       draggable={isDraggable}
+      opacity={slot._isGhost ? 0 : 1}
       onDragStart={(e) => {
         e.cancelBubble = true;
         isDraggingRef.current = true;
+        if (onDragStart) onDragStart(slot);
       }}
       onDragEnd={(e) => {
         e.cancelBubble = true;

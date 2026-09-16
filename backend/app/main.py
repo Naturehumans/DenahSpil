@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import engine, Base, AsyncSessionLocal
 from app.middleware.error_handler import error_handler_middleware
-from app.api import health, auth, buildings, floors, equipment_categories, equipments, export, slot_templates, inventory
+from app.api import health, auth, buildings, floors, equipment_categories, equipments, export, slot_templates, inventory, room_polygons
 
 # Create uploads directory if it doesn't exist
 os.makedirs("uploads/floor-plans", exist_ok=True)
@@ -38,6 +38,13 @@ async def seed_data():
             building = Building(name="Gedung Utama", description="Gedung Utama Spil", total_floors=1)
             db.add(building)
             logger.info("Seeded default building")
+            
+        # Seed Dummy User
+        result = await db.execute(select(User).where(User.username == "user"))
+        if not result.scalars().first():
+            dummy = User(username="user", email="user@spildenah.com", hashed_password=hash_password("12345"), role="user")
+            db.add(dummy)
+            logger.info("Seeded dummy user")
             
         # Seed Equipment Categories
         categories = [
@@ -99,7 +106,7 @@ app.middleware("http")(error_handler_middleware)
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL, "http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -118,6 +125,7 @@ app.include_router(equipments.router, prefix="/api", tags=["Equipments"])
 app.include_router(export.router, prefix="/api", tags=["Export"])
 app.include_router(slot_templates.router, prefix="/api", tags=["Slot Templates"])
 app.include_router(inventory.router, prefix="/api", tags=["Inventory"])
+app.include_router(room_polygons.router, prefix="/api", tags=["Room Polygons"])
 
 @app.get("/")
 def read_root():

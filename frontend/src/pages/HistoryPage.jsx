@@ -21,17 +21,35 @@ import {
   PackageCheck,
   PlusCircle,
   LayoutGrid,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ArrowUp,
+  ChevronLeft,
+  ChevronRight,
+  Calendar
 } from 'lucide-react';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
+import { id } from 'date-fns/locale/id';
 
 const HistoryPage = () => {
   const navigate = useNavigate();
   const { showToast } = useToast();
   
-  const [viewTab, setViewTab] = useState('history'); // 'history' (Default), 'matrix', or 'usage'
+  const [viewTab, setViewTab] = useState('history'); // 'history' (Default), 'matrix', 'usage', or 'expired'
   const [logs, setLogs] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [expiredItems, setExpiredItems] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  const getDaysToExpiration = (expiredDateStr) => {
+    if (!expiredDateStr) return null;
+    const exp = new Date(expiredDateStr);
+    const now = new Date();
+    exp.setHours(0,0,0,0);
+    now.setHours(0,0,0,0);
+    const diffTime = exp.getTime() - now.getTime();
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  };
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -41,23 +59,23 @@ const HistoryPage = () => {
   const [selectedCondition, setSelectedCondition] = useState('all');
   const [sortField, setSortField] = useState('created_at');
   const [sortAsc, setSortAsc] = useState(false);
+  const [dateRange, setDateRange] = useState([null, null]);
+  const [startDate, endDate] = dateRange;
 
   const [selectedLogTimeline, setSelectedLogTimeline] = useState(null);
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 100;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedBuilding, selectedFloor, selectedCategoryId, selectedCondition, sortField, sortAsc]);
+
   const matrixExportRef = useRef(null);
   const usageExportRef = useRef(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
-  const handleTopExport = () => {
-    if (viewTab === 'history') {
-      handleExportHistory();
-    } else if (viewTab === 'matrix') {
-      if (matrixExportRef.current) matrixExportRef.current();
-      else showToast('Data List Aset belum siap untuk diekspor', 'warning');
-    } else if (viewTab === 'usage') {
-      if (usageExportRef.current) usageExportRef.current();
-      else showToast('Data Daftar Pemakaian belum siap untuk diekspor', 'warning');
-    }
-  };
+
 
   useEffect(() => {
     fetchHistoryData();
@@ -66,49 +84,53 @@ const HistoryPage = () => {
   const fetchHistoryData = async () => {
     setLoading(true);
     try {
-      const logsRes = await getInventoryLogs().catch(err => {
-        console.error("Error fetching logs:", err);
-        return [];
-      });
-      const catsRes = await getCategories().catch(err => {
-        console.error("Error fetching categories:", err);
-        return [];
-      });
+      const { getAssets } = await import('../api/inventory');
 
-      let localLogs = [];
-      try {
-        const saved = localStorage.getItem('spil_local_history_logs');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          // Filter out move logs from localStorage so local storage doesn't duplicate official DB move logs
-          localLogs = parsed.filter(l => l.action_type !== 'move');
-          localStorage.setItem('spil_local_history_logs', JSON.stringify(localLogs));
-        }
-      } catch (e) {}
+      const [logsRes, catsRes, assetsRes] = await Promise.all([
+        getInventoryLogs().catch(err => {
+          console.error("Error fetching logs:", err);
+          return [];
+        }),
+        getCategories().catch(err => {
+          console.error("Error fetching categories:", err);
+          return [];
+        }),
+        getAssets('available').catch(err => {
+          console.error("Error fetching available assets:", err);
+          return [];
+        })
+      ]);
 
       const backendLogs = Array.isArray(logsRes) ? logsRes : [];
-
-      // Combine and deduplicate strictly by (asset_id + slot_code + status) or log ID
-      const combined = [...localLogs, ...backendLogs];
-      const seenKeys = new Set();
-      
-      const mergedLogs = combined.filter(log => {
-        if (!log) return false;
-        const idKey = log.id ? `id_${log.id}` : null;
-        const attrKey = `${log.asset_id || ''}_${log.slot_code || ''}_${log.status || ''}`;
-        
-        if (idKey && seenKeys.has(idKey)) return false;
-        if (seenKeys.has(attrKey)) return false;
-        
-        if (idKey) seenKeys.add(idKey);
-        seenKeys.add(attrKey);
-        return true;
-      });
-
-      setLogs(mergedLogs);
+      setLogs(backendLogs);
       setCategories(Array.isArray(catsRes) ? catsRes : []);
-    } catch (err) {
-      console.error(err);
+
+      // Load expired items from API
+      try {
+        const assets = assetsRes;
+        
+        let exItems = [];
+        if (assets && Array.isArray(assets)) {
+          assets.forEach(asset => {
+            if (asset.expired_date && !exItems.some(ex => ex.id === asset.id)) {
+              exItems.push({
+                ...asset,
+                category_name: asset.category?.name || 'Umum',
+                stock: 1 // Since it's from /assets, each represents 1 unit
+              });
+            }
+          });
+          // Sort expired items by date closest to expiration
+          exItems.sort((a, b) => new Date(a.expired_date) - new Date(b.expired_date));
+        }
+        setExpiredItems(exItems);
+      } catch (e) {
+        console.error("Error loading expired items:", e);
+      }
+      
+    } catch (e) {
+      console.error(e);
+      showToast('Gagal memuat data riwayat', 'error');
     } finally {
       setLoading(false);
     }
@@ -202,10 +224,25 @@ const HistoryPage = () => {
 
     if (selectedBuilding !== 'all' && bName !== selectedBuilding) return false;
     if (selectedFloor !== 'all' && fName !== selectedFloor) return false;
-    if (selectedCategoryId !== 'all' && log.category_id !== selectedCategoryId) return false;
+    const catId = String(log.category?.id || log.category_id || '');
+    if (selectedCategoryId !== 'all' && catId !== String(selectedCategoryId)) return false;
     if (selectedCondition !== 'all') {
       const cond = selectedCondition.toLowerCase();
       if (!statusText.toLowerCase().includes(cond)) return false;
+    }
+
+    if (startDate) {
+      const logDate = new Date(log.created_at);
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      if (logDate < start) return false;
+    }
+
+    if (endDate) {
+      const logDate = new Date(log.created_at);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      if (logDate > end) return false;
     }
     
     if (searchQuery.trim() !== '') {
@@ -252,6 +289,9 @@ const HistoryPage = () => {
     return 0;
   });
 
+  const totalPages = Math.ceil(sortedLogs.length / itemsPerPage) || 1;
+  const paginatedLogs = sortedLogs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   const handleSort = (field) => {
     if (sortField === field) {
       setSortAsc(!sortAsc);
@@ -261,38 +301,203 @@ const HistoryPage = () => {
     }
   };
 
-  const handleExportHistory = () => {
+  const handleExportHistoryXLSX = async () => {
     if (sortedLogs.length === 0) {
       showToast('Tidak ada data riwayat untuk diekspor', 'warning');
       return;
     }
 
-    const headers = ['Lokasi', 'Lantai', 'Ruang', 'ID Tempat (Slot)', 'ID Barang (Aset)', 'Kategori', 'Merk', 'Tipe/Model', 'Kondisi', 'Tanggal Update'];
-    const rows = sortedLogs.map(log => [
-      `"${getBuildingName(log)}"`,
-      `"${getFloorName(log)}"`,
-      `"${log.room_name || '-'}"`,
-      `"${log.slot_code || '-'}"`,
-      `"${log.asset_id || log.category?.name || '-'}"`,
-      `"${log.category?.name || '-'}"`,
-      `"${log.brand || '-'}"`,
-      `"${log.model_number || '-'}"`,
-      `"${getStatusText(log)}"`,
-      `"${new Date(log.created_at).toLocaleDateString('id-ID')}"`
-    ]);
+    try {
+      const XLSX = await import('xlsx');
+      const sheetData = [];
+      sheetData.push(['RIWAYAT & DATA PENGGANTIAN BARANG']);
+      sheetData.push([]);
+      
+      const headers = ['Lokasi', 'Lantai', 'Ruang', 'ID Tempat (Slot)', 'ID Barang (Aset)', 'Kategori', 'Merk', 'Tipe/Model', 'Kondisi', 'Tanggal Update'];
+      sheetData.push(headers);
 
-    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' 
-      + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      sortedLogs.forEach(log => {
+        sheetData.push([
+          getBuildingName(log),
+          getFloorName(log),
+          log.room_name || '-',
+          log.slot_code || '-',
+          log.asset_id || log.category?.name || '-',
+          log.category?.name || '-',
+          log.brand || '-',
+          log.model_number || '-',
+          getStatusText(log),
+          new Date(log.created_at).toLocaleDateString('id-ID', {day:'2-digit', month:'short', year:'numeric'})
+        ]);
+      });
 
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `history_spil_denah_${new Date().toISOString().slice(0,10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    showToast('File CSV berhasil diunduh!', 'success');
+      const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+      worksheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } }];
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Riwayat");
+      XLSX.writeFile(workbook, `history_spil_denah_${new Date().toISOString().slice(0,10)}.xlsx`);
+      
+      showToast('Riwayat berhasil di-export ke Excel (.xlsx)', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Gagal memuat export Excel', 'error');
+    }
+  };
+
+  const handleExportHistoryPDF = async () => {
+    if (sortedLogs.length === 0) {
+      showToast('Tidak ada data riwayat untuk diekspor', 'warning');
+      return;
+    }
+
+    try {
+      const { jsPDF } = await import('jspdf');
+      await import('jspdf-autotable');
+      const doc = new jsPDF('landscape');
+
+      doc.setFontSize(14);
+      doc.text('Riwayat & Data Penggantian Barang', 14, 15);
+      doc.setFontSize(10);
+      doc.text(`Tanggal Export: ${new Date().toLocaleDateString('id-ID')}`, 14, 22);
+
+      const tableBody = sortedLogs.map(log => [
+        getBuildingName(log),
+        getFloorName(log),
+        log.room_name || '-',
+        log.slot_code || '-',
+        log.asset_id || log.category?.name || '-',
+        log.category?.name || '-',
+        log.brand || '-',
+        log.model_number || '-',
+        getStatusText(log),
+        new Date(log.created_at).toLocaleDateString('id-ID')
+      ]);
+
+      doc.autoTable({
+        startY: 28,
+        head: [['Lokasi', 'Lantai', 'Ruang', 'ID Slot', 'ID Aset', 'Kategori', 'Merk', 'Tipe/Model', 'Kondisi', 'Tanggal']],
+        body: tableBody,
+        theme: 'grid',
+        headStyles: { fillColor: [58, 149, 66] },
+        styles: { fontSize: 8, cellPadding: 2 }
+      });
+
+      doc.save(`history_spil_denah_${new Date().toISOString().slice(0,10)}.pdf`);
+      showToast('Riwayat berhasil di-export ke PDF', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Gagal memuat export PDF', 'error');
+    }
+  };
+
+  const handleExportExpiredXLSX = async () => {
+    if (expiredItems.length === 0) {
+      showToast('Tidak ada data barang expired untuk diekspor', 'warning');
+      return;
+    }
+
+    try {
+      const XLSX = await import('xlsx');
+      const sheetData = [];
+      sheetData.push(['DATA BARANG KEDALUWARSA (EXPIRED)']);
+      sheetData.push([]);
+      
+      const headers = ['Kategori Barang', 'Merk & Tipe', 'Jumlah Stok Expired', 'Tanggal Pembelian', 'Tanggal Kedaluwarsa', 'Status / Sisa Hari'];
+      sheetData.push(headers);
+
+      expiredItems.forEach(item => {
+        const days = getDaysToExpiration(item.expired_date);
+        const status = days < 0 ? 'Sudah Kedaluwarsa' : `${days} Hari Lagi`;
+        sheetData.push([
+          item.category_name || '-',
+          `${item.brand || '-'} (${item.model_number || '-'})`,
+          `${item.stock} Unit`,
+          item.purchase_date ? new Date(item.purchase_date).toLocaleDateString('id-ID') : '-',
+          new Date(item.expired_date).toLocaleDateString('id-ID'),
+          status
+        ]);
+      });
+
+      const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+      worksheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } }];
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Barang Expired");
+      XLSX.writeFile(workbook, `barang_expired_spil_denah_${new Date().toISOString().slice(0,10)}.xlsx`);
+      
+      showToast('Data Barang Expired berhasil di-export ke Excel (.xlsx)', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Gagal memuat export Excel', 'error');
+    }
+  };
+
+  const handleExportExpiredPDF = async () => {
+    if (expiredItems.length === 0) {
+      showToast('Tidak ada data barang expired untuk diekspor', 'warning');
+      return;
+    }
+
+    try {
+      const { jsPDF } = await import('jspdf');
+      await import('jspdf-autotable');
+      const doc = new jsPDF('landscape');
+
+      doc.setFontSize(14);
+      doc.text('Data Barang Kedaluwarsa (Expired)', 14, 15);
+      doc.setFontSize(10);
+      doc.text(`Tanggal Export: ${new Date().toLocaleDateString('id-ID')}`, 14, 22);
+
+      const tableBody = expiredItems.map(item => {
+        const days = getDaysToExpiration(item.expired_date);
+        const status = days < 0 ? 'Sudah Kedaluwarsa' : `${days} Hari Lagi`;
+        return [
+          item.category_name || '-',
+          `${item.brand || '-'} (${item.model_number || '-'})`,
+          `${item.stock} Unit`,
+          item.purchase_date ? new Date(item.purchase_date).toLocaleDateString('id-ID') : '-',
+          new Date(item.expired_date).toLocaleDateString('id-ID'),
+          status
+        ];
+      });
+
+      doc.autoTable({
+        startY: 28,
+        head: [['Kategori Barang', 'Merk & Tipe', 'Jumlah Stok', 'Tanggal Pembelian', 'Tanggal Kedaluwarsa', 'Status / Sisa Hari']],
+        body: tableBody,
+        theme: 'grid',
+        headStyles: { fillColor: [220, 38, 38] }, // Red header for expired
+        styles: { fontSize: 9, cellPadding: 3 }
+      });
+
+      doc.save(`barang_expired_spil_denah_${new Date().toISOString().slice(0,10)}.pdf`);
+      showToast('Data Barang Expired berhasil di-export ke PDF', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Gagal memuat export PDF', 'error');
+    }
+  };
+
+  const handleTopExport = (format) => {
+    setShowExportMenu(false);
+    if (viewTab === 'matrix') {
+      if (matrixExportRef.current) matrixExportRef.current(format);
+      else showToast('Data List Aset belum siap untuk diekspor', 'warning');
+    } else if (viewTab === 'usage') {
+      if (usageExportRef.current) usageExportRef.current(format);
+      else showToast('Data Daftar Pemakaian belum siap untuk diekspor', 'warning');
+    } else if (viewTab === 'history') {
+      if (format === 'pdf') {
+        handleExportHistoryPDF();
+      } else {
+        handleExportHistoryXLSX();
+      }
+    } else if (viewTab === 'expired') {
+      if (format === 'pdf') {
+        handleExportExpiredPDF();
+      } else {
+        handleExportExpiredXLSX();
+      }
+    }
   };
 
   return (
@@ -327,8 +532,10 @@ const HistoryPage = () => {
               <span>Kembali ke Denah</span>
             </button>
 
+            {/* Top Right Action Button */}
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', position: 'relative' }}>
             <button
-              onClick={handleTopExport}
+              onClick={() => setShowExportMenu(!showExportMenu)}
               className="neu-raised neu-raised-btn"
               style={{
                 padding: '8px 16px',
@@ -346,11 +553,57 @@ const HistoryPage = () => {
                 width: 'auto'
               }}
             >
-              {viewTab === 'history' ? <Download size={16} /> : <FileSpreadsheet size={16} />}
-              <span>
-                {viewTab === 'history' ? 'Export CSV Log' : 'Export Excel (.xlsx)'}
-              </span>
+              <Download size={16} strokeWidth={2.5} />
+              <span>Export Data</span>
             </button>
+            
+            {showExportMenu && (
+              <>
+                <div 
+                  style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 90 }} 
+                  onClick={() => setShowExportMenu(false)}
+                />
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  right: 0,
+                  marginTop: '8px',
+                  background: 'white',
+                  borderRadius: '12px',
+                  boxShadow: '0 8px 30px rgba(0,0,0,0.15)',
+                  overflow: 'hidden',
+                  zIndex: 100,
+                  minWidth: '180px',
+                  border: '1px solid #e2e8f0'
+                }}>
+                  <button
+                    onClick={() => handleTopExport('xlsx')}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '12px 16px',
+                      background: 'transparent', border: 'none', borderBottom: '1px solid #f1f5f9', cursor: 'pointer',
+                      textAlign: 'left', color: '#334155', fontWeight: '600', fontSize: '0.9rem', transition: 'background 0.2s'
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.background = '#f8fafc'}
+                    onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    Export Excel (.xlsx)
+                  </button>
+                  <button
+                    onClick={() => handleTopExport('pdf')}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '12px 16px',
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      textAlign: 'left', color: '#334155', fontWeight: '600', fontSize: '0.9rem', transition: 'background 0.2s'
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.background = '#f8fafc'}
+                    onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    Export PDF (.pdf)
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           </div>
 
           <div style={{ textAlign: 'center', margin: '0 auto', maxWidth: '750px' }}>
@@ -400,6 +653,7 @@ const HistoryPage = () => {
             <option value="history">⏱️ Riwayat Data</option>
             <option value="matrix">🔲 List Aset & Matriks</option>
             <option value="usage">📄 Daftar Pemakaian</option>
+            <option value="expired">🚨 Barang Expired</option>
           </select>
         </div>
 
@@ -495,6 +749,31 @@ const HistoryPage = () => {
               <FileSpreadsheet size={16} />
               <span>Daftar Pemakaian</span>
             </button>
+
+            <button
+              onClick={() => setViewTab('expired')}
+              style={{
+                padding: '10px 16px',
+                borderRadius: '12px',
+                border: 'none',
+                cursor: 'pointer',
+                fontWeight: '700',
+                fontSize: '0.8125rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: viewTab === 'expired' ? 'var(--color-primary)' : 'transparent',
+                color: viewTab === 'expired' ? 'white' : 'var(--color-text-secondary)',
+                boxShadow: viewTab === 'expired' ? '0 4px 14px rgba(58, 149, 66, 0.35)' : 'none',
+                transition: 'all 0.25s ease',
+                whiteSpace: 'nowrap',
+                flex: '1 1 auto',
+                justifyContent: 'center'
+              }}
+            >
+              <AlertTriangle size={16} />
+              <span>Barang Expired</span>
+            </button>
           </div>
         </div>
 
@@ -502,6 +781,64 @@ const HistoryPage = () => {
           <AssetDashboardMatrix onRegisterExport={(fn) => { matrixExportRef.current = fn; }} />
         ) : viewTab === 'usage' ? (
           <CategoryUsageTracker onRegisterExport={(fn) => { usageExportRef.current = fn; }} />
+        ) : viewTab === 'expired' ? (
+          <div className="neu-raised" style={{ borderRadius: '12px', overflow: 'hidden', background: 'var(--color-bg)', boxShadow: '0 8px 30px rgba(0,0,0,0.08)' }}>
+            {expiredItems.length === 0 ? (
+              <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
+                <AlertTriangle size={48} color="var(--color-text-muted)" style={{ marginBottom: '16px' }} />
+                <h3 style={{ margin: '0 0 8px 0', color: 'var(--color-text)' }}>Tidak ada data barang expired</h3>
+                <p style={{ margin: 0, fontSize: '0.875rem' }}>Tidak ada barang yang tercatat memiliki tanggal kedaluwarsa.</p>
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem', fontFamily: 'Inter, sans-serif' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--color-primary)', color: 'white' }}>
+                      <th style={{ padding: '14px 16px', fontWeight: '700' }}>Kategori Barang</th>
+                      <th style={{ padding: '14px 16px', fontWeight: '700' }}>Merk & Tipe</th>
+                      <th style={{ padding: '14px 16px', fontWeight: '700' }}>Jumlah Stok Expired</th>
+                      <th style={{ padding: '14px 16px', fontWeight: '700' }}>Tanggal Pembelian</th>
+                      <th style={{ padding: '14px 16px', fontWeight: '700' }}>Tanggal Kedaluwarsa</th>
+                      <th style={{ padding: '14px 16px', fontWeight: '700' }}>Status / Sisa Hari</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expiredItems.map((item, index) => {
+                      const days = getDaysToExpiration(item.expired_date);
+                      const isExpired = days < 0;
+                      return (
+                        <tr key={index} style={{ borderBottom: '1px solid #e2e8f0', background: index % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                          <td style={{ padding: '12px 16px', fontWeight: '600' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              {isExpired && <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#dc2626', flexShrink: 0 }} title="Sudah Kedaluwarsa!" />}
+                              {item.category_name}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px 16px', color: '#334155' }}>{item.brand} ({item.model_number})</td>
+                          <td style={{ padding: '12px 16px', fontWeight: '700', color: 'var(--color-primary)' }}>{item.stock} Unit</td>
+                          <td style={{ padding: '12px 16px', color: '#475569' }}>{item.purchase_date ? new Date(item.purchase_date).toLocaleDateString('id-ID', {day: '2-digit', month: '2-digit', year: 'numeric'}) : '-'}</td>
+                          <td style={{ padding: '12px 16px', fontWeight: '600', color: isExpired ? '#dc2626' : 'inherit' }}>
+                            {new Date(item.expired_date).toLocaleDateString('id-ID', {day: '2-digit', month: '2-digit', year: 'numeric'})}
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            {isExpired ? (
+                              <span style={{ padding: '6px 10px', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.12)', color: '#dc2626', fontWeight: '700', fontSize: '0.8rem', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                                Sudah Kedaluwarsa
+                              </span>
+                            ) : (
+                              <span style={{ padding: '6px 10px', borderRadius: '6px', background: 'rgba(245, 158, 11, 0.12)', color: '#d97706', fontWeight: '700', fontSize: '0.8rem', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+                                {days} Hari Lagi
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         ) : (
           <>
         {/* Filters Bar (ABOVE Summary Cards) */}
@@ -597,7 +934,7 @@ const HistoryPage = () => {
             {/* Filter Kategori */}
             <select
               value={selectedCategoryId}
-              onChange={(e) => setSelectedCategoryId(e.target.value === 'all' ? 'all' : parseInt(e.target.value))}
+              onChange={(e) => setSelectedCategoryId(e.target.value)}
               className="neu-inset filter-select-mobile"
               style={{
                 padding: '8px 12px',
@@ -640,8 +977,28 @@ const HistoryPage = () => {
               <option value="rusak">Rusak / Perlu Cek</option>
               <option value="buang">Dibuang / Off</option>
             </select>
+
+            {/* Filter Tanggal Range */}
+            <div className="neu-inset filter-select-mobile" style={{ display: 'flex', alignItems: 'center', padding: '0 12px', borderRadius: '10px', background: 'var(--color-bg)' }}>
+              <Calendar size={15} color="var(--color-primary)" style={{ marginRight: '8px' }} />
+              <DatePicker
+                selectsRange={true}
+                startDate={startDate}
+                endDate={endDate}
+                onChange={(update) => {
+                  setDateRange(update);
+                }}
+                isClearable={true}
+                placeholderText="Pilih Rentang Tanggal"
+                locale={id}
+                dateFormat="dd MMM yyyy"
+                className="custom-date-picker-input"
+                shouldCloseOnSelect={true}
+              />
+            </div>
+
             {/* Reset Filters Button */}
-            {(selectedBuilding !== 'all' || selectedFloor !== 'all' || selectedCategoryId !== 'all' || selectedCondition !== 'all' || searchQuery !== '') && (
+            {(selectedBuilding !== 'all' || selectedFloor !== 'all' || selectedCategoryId !== 'all' || selectedCondition !== 'all' || searchQuery !== '' || startDate !== '' || endDate !== '') && (
               <button
                 onClick={() => {
                   setSelectedBuilding('all');
@@ -649,6 +1006,7 @@ const HistoryPage = () => {
                   setSelectedCategoryId('all');
                   setSelectedCondition('all');
                   setSearchQuery('');
+                  setDateRange([null, null]);
                 }}
                 className="filter-reset-mobile"
                 style={{
@@ -681,8 +1039,9 @@ const HistoryPage = () => {
               <p style={{ margin: 0, fontSize: '0.875rem' }}>Belum ada log yang sesuai dengan pencarian Anda.</p>
             </div>
           ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ 
+            <>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ 
                 width: '100%', 
                 borderCollapse: 'collapse', 
                 textAlign: 'left',
@@ -725,7 +1084,7 @@ const HistoryPage = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedLogs.map((log, index) => {
+                  {paginatedLogs.map((log, index) => {
                     const statusStyle = getStatusStyle(log);
                     const isEven = index % 2 === 0;
 
@@ -830,9 +1189,34 @@ const HistoryPage = () => {
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+                  </tbody>
+                </table>
+              </div>
+
+              {totalPages > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginTop: '20px', gap: '15px' }}>
+                  <button 
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="neu-action-btn"
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '10px', border: 'none', background: currentPage === 1 ? '#e2e8f0' : 'var(--color-primary)', color: currentPage === 1 ? '#94a3b8' : 'white', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', fontWeight: '600', transition: 'all 0.2s' }}
+                  >
+                    <ChevronLeft size={18} /> Prev
+                  </button>
+                  <span style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--color-text)', background: 'white', padding: '8px 16px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                    Halaman {currentPage} dari {totalPages}
+                  </span>
+                  <button 
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="neu-action-btn"
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '10px', border: 'none', background: currentPage === totalPages ? '#e2e8f0' : 'var(--color-primary)', color: currentPage === totalPages ? '#94a3b8' : 'white', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', fontWeight: '600', transition: 'all 0.2s' }}
+                  >
+                    Next <ChevronRight size={18} />
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
         </>
@@ -893,6 +1277,33 @@ const HistoryPage = () => {
           </div>
         </div>
       )}
+
+      {/* Back to Top Button */}
+      <button 
+        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        className="neu-action-btn"
+        style={{ 
+          position: 'fixed', 
+          bottom: '30px', 
+          right: '30px', 
+          width: '50px', 
+          height: '50px', 
+          borderRadius: '50%', 
+          background: 'var(--color-primary)', 
+          color: 'white', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          border: 'none', 
+          cursor: 'pointer', 
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)', 
+          zIndex: 100 
+        }}
+        title="Kembali ke atas"
+      >
+        <ArrowUp size={24} /> 
+      </button>
+
     </div>
   );
 };

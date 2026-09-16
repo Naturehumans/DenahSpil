@@ -23,9 +23,12 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
 
   useEffect(() => {
     if (onRegisterExport) {
-      onRegisterExport(handleExportXLSX);
+      onRegisterExport((format) => {
+        if (format === 'pdf') handleExportPDF();
+        else handleExportXLSX();
+      });
     }
-  }, []);
+  });
 
   const loadData = async () => {
     setLoading(true);
@@ -39,14 +42,7 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
 
       const catList = Array.isArray(catsRes) ? catsRes : [];
       
-      // Load local logs saved in localStorage
-      let localLogs = [];
-      try {
-        const saved = localStorage.getItem('spil_local_logs');
-        if (saved) localLogs = JSON.parse(saved);
-      } catch (e) {}
-
-      const mergedLogs = [...localLogs, ...(Array.isArray(logsRes) ? logsRes : [])];
+      const mergedLogs = Array.isArray(logsRes) ? logsRes : [];
 
       setCategories(catList);
       setLogs(mergedLogs);
@@ -98,46 +94,9 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
       return true;
     };
 
-    // 1. Read from localStorage spil_category_brands (Primary source of truth for user-entered inventory!)
-    try {
-      const savedBrands = localStorage.getItem('spil_category_brands');
-      if (savedBrands) {
-        const map = JSON.parse(savedBrands);
-        const catBrands = map[catNameLower] || map[cat.id] || map[cat.name] || [];
-        if (Array.isArray(catBrands) && catBrands.length > 0) {
-          catBrands.forEach(b => {
-            let displayName = b.brand;
-            if (b.model_number && b.model_number !== 'Standard') {
-              displayName = b.brand ? `${b.brand} (${b.model_number})` : b.model_number;
-            }
-            if (!displayName) displayName = b.name;
-
-            if (isValidItemName(displayName, b.brand, b.model_number)) {
-              const currentStock = parseInt(b.stock) || 0;
-              modelStockMap.set(displayName, {
-                name: displayName,
-                brand: b.brand || '',
-                model_number: b.model_number || 'Standard',
-                stock: currentStock
-              });
-            }
-          });
-        }
-      }
-    } catch (e) {
-      console.log('Error reading spil_category_brands:', e);
-    }
-
-    // If user has explicitly registered brand items in inventory, return ONLY those real items!
-    if (modelStockMap.size > 0) {
-      return Array.from(modelStockMap.values());
-    }
-
-    // 2. Fallback: check database assets for custom registered items (excluding slot IDs and dummy codes)
+    // Count stock from backend assets (excluding slot IDs and dummy codes)
     assets.forEach(ast => {
-      const isMatch = ast.category_id === cat.id || 
-                      ast.category?.id === cat.id || 
-                      (ast.category?.name && ast.category.name.toLowerCase() === catNameLower);
+      const isMatch = String(ast.category_id) === String(cat.id);
       if (isMatch) {
         let displayName = ast.brand;
         if (ast.model_number && ast.model_number !== 'Standard') {
@@ -145,14 +104,16 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
         }
 
         if (isValidItemName(displayName, ast.brand, ast.model_number)) {
-          const isAvail = ast.status === 'available' || ast.status === 'good' || !ast.status;
+          const isAvail = ast.status === 'available';
           if (!modelStockMap.has(displayName)) {
             modelStockMap.set(displayName, {
               name: displayName,
               brand: ast.brand || '',
               model_number: ast.model_number || 'Standard',
-              stock: isAvail ? (ast.stock || 1) : 0
+              stock: isAvail ? 1 : 0
             });
+          } else if (isAvail) {
+            modelStockMap.get(displayName).stock += 1;
           }
         }
       }
@@ -237,33 +198,50 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
     // MASUK: Saat stok ditambahkan ke inventori / gudang / restock
     const actionType = (log.action_type || '').toLowerCase();
     const statusText = (log.status || '').toLowerCase();
+    const locationLower = (log.location_info || '').toLowerCase();
 
-    const isDiscard = actionType.includes('remove') || 
+    // "Dilepas dari Gedung X" = unit dikembalikan dari ruangan ke gudang → harus Masuk
+    const isDilepasKembali = locationLower.includes('dilepas dari') ||
+                              locationLower.includes('dilepas/diganti dari');
+
+    // KELUAR = Dibuang (permanen) ATAU Dipasang ke gedung.
+    // Dibuang:
+    const isDiscard = !isDilepasKembali && (
+                      actionType.includes('remove') || 
                       actionType.includes('discard') || 
                       actionType.includes('delete') || 
                       statusText.includes('dibuang') || 
-                      statusText.includes('dihapus');
+                      statusText.includes('dihapus')
+                     );
 
-    const isMasuk = !isDiscard && (
-                    actionType.includes('add_stock') || 
-                    actionType.includes('restock') || 
-                    actionType.includes('stock_in') || 
-                    actionType.includes('repair') || 
-                    statusText.includes('siap') ||
-                    statusText.includes('gudang')
-                   );
+    // Dipasang:
+    const isDipasang = !isDilepasKembali && (
+                       actionType.includes('deploy') ||
+                       actionType.includes('move') ||
+                       locationLower.includes('ditempatkan') ||
+                       locationLower.includes('penempatan')
+                      );
 
-    // KELUAR: Saat stok dipakai / dipasang ke lokasi denah ATAU stok dibuang/dihapus
-    const isKeluar = !isMasuk;
+    const isKeluar = isDiscard || isDipasang;
+
+    // MASUK = Selain keluar (misal: tambah stok, diretur, dilepas, rusak/masuk perbaikan, dsb)
+    const isMasuk = !isKeluar;
     const logQty = parseInt(log.quantity || log.qty || log.stock) || 1;
 
     let finalLocationText = '';
     if (isDiscard) {
       finalLocationText = log.location_info || log.notes || 'Stok dibuang/dihapus';
+    } else if (isDilepasKembali) {
+      // Tampilkan lokasi asli (dari ruangan mana unit dikembalikan) agar lebih informatif
+      finalLocationText = log.location_info || `Dikembalikan ke gudang`;
     } else if (isMasuk) {
-      finalLocationText = `Stok Masuk Gudang (${selectedCategory.name || 'Siap Pakai'})`;
+      finalLocationText = log.location_info || `Stok Masuk Gudang`;
     } else {
       finalLocationText = log.location_info || `${log.building_name || 'Gedung Utama'} - ${log.floor_name || 'Lt.1'} ${log.room_name ? '(' + log.room_name + ')' : ''}`;
+      // Retroaktif menambahkan Asset ID untuk log "Penempatan/Penggantian" lama yang tidak punya Asset ID di teksnya
+      if (finalLocationText.startsWith('Penempatan/Penggantian di') && log.asset_id) {
+        finalLocationText = `"${log.asset_id}" ${finalLocationText}`;
+      }
     }
 
     return {
@@ -385,6 +363,103 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
     } catch (err) {
       console.error(err);
       showToast('Gagal memuat export Excel', 'error');
+    }
+  };
+
+  const handleExportPDF = async () => {
+    try {
+      const { jsPDF } = await import('jspdf');
+      await import('jspdf-autotable');
+
+      const doc = new jsPDF('landscape');
+      
+      doc.setFontSize(14);
+      doc.text(`DAFTAR PEMAKAIAN ${selectedCategory.name.toUpperCase()}`, 14, 15);
+      
+      const todayDate = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: '2-digit' });
+      doc.setFontSize(10);
+      doc.text(`Update: ${todayDate}`, 14, 22);
+
+      // We need multiple header rows for jspdf-autotable to mimic the nested layout.
+      // Row 1: subItems names
+      // Row 2: Sisa stock
+      // Row 3: Masuk / Keluar
+
+      const headRow1 = [{ content: 'No', rowSpan: 3 }, { content: 'Tanggal', rowSpan: 3 }];
+      categorySubItems.forEach(item => {
+        headRow1.push({ content: item.name, colSpan: 2, styles: { halign: 'center' } });
+      });
+      headRow1.push({ content: 'Lokasi Pemakaian', rowSpan: 3, styles: { halign: 'left' } });
+
+      const headRow2 = [];
+      categorySubItems.forEach(item => {
+        headRow2.push({ content: `SISA STOCK ${item.stock}`, colSpan: 2, styles: { halign: 'center', textColor: [58, 149, 66] } });
+      });
+
+      const headRow3 = [];
+      categorySubItems.forEach(() => {
+        headRow3.push({ content: 'Masuk', styles: { halign: 'center', textColor: [22, 163, 74] } });
+        headRow3.push({ content: 'Keluar', styles: { halign: 'center', textColor: [220, 38, 38] } });
+      });
+
+      const bodyRows = displayRows.map(r => {
+        const row = [r.no, r.date];
+        categorySubItems.forEach((item) => {
+          // find if this row matches the item
+          const itemBrand = (item.brand || '').toLowerCase().trim();
+          const itemModel = (item.model_number || '').toLowerCase().trim();
+          const itemName = (item.name || '').toLowerCase().trim();
+          const rowModelName = (r.modelName || '').toLowerCase().trim();
+
+          let isMatch = false;
+          if (rowModelName && itemName) {
+            if (rowModelName === itemName) {
+              isMatch = true;
+            } else if (itemModel && itemModel !== 'standard' && itemModel.length > 2 && rowModelName.includes(itemModel)) {
+              if (!itemBrand || itemBrand === '-' || rowModelName.includes(itemBrand)) isMatch = true;
+            } else if (itemBrand && itemBrand !== '-' && rowModelName.includes(itemBrand)) {
+              if (!itemModel || itemModel === 'standard') {
+                if (!rowModelName.includes('(')) isMatch = true;
+              } else if (rowModelName.includes(itemModel)) {
+                isMatch = true;
+              }
+            }
+          }
+          if (!isMatch && categorySubItems.length === 1) isMatch = true;
+
+          const masukVal = isMatch && r.isMasuk ? r.qty : '';
+          const keluarVal = isMatch && r.isKeluar ? r.qty : '';
+          row.push(masukVal, keluarVal);
+        });
+        row.push(r.location);
+        return row;
+      });
+
+      doc.autoTable({
+        startY: 28,
+        head: [headRow1, headRow2, headRow3],
+        body: bodyRows,
+        theme: 'grid',
+        headStyles: { fillColor: [248, 250, 252], textColor: [51, 65, 85], fontStyle: 'bold' },
+        styles: { fontSize: 8, cellPadding: 2, halign: 'center' },
+        columnStyles: {
+          0: { halign: 'center', cellWidth: 10 },
+          1: { halign: 'center', cellWidth: 20 },
+          // the last column is variable index, we can just use styles to override halign 'left' for specific cells.
+        },
+        didParseCell: function(data) {
+          // Last column alignment
+          if (data.section === 'body' && data.column.index === data.row.cells.length - 1) {
+            data.cell.styles.halign = 'left';
+          }
+        }
+      });
+
+      doc.save(`daftar_pemakaian_${selectedCategory.name}_${new Date().toISOString().slice(0,10)}.pdf`);
+      showToast(`Daftar Pemakaian ${selectedCategory.name} berhasil di-export ke PDF!`, 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Gagal memuat export PDF', 'error');
     }
   };
 
@@ -596,11 +671,22 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
                       let isMatch = false;
                       if (rowModelName && itemName) {
                         if (rowModelName === itemName) {
+                          // Exact full-name match (e.g. "gree (inverter 1pk)" === "gree (inverter 1pk)")
                           isMatch = true;
                         } else if (itemModel && itemModel !== 'standard' && itemModel.length > 2 && rowModelName.includes(itemModel)) {
-                          isMatch = true;
-                        } else if (itemBrand && itemBrand.length > 2 && rowModelName.includes(itemBrand)) {
-                          if (!itemModel || itemModel === 'standard' || rowModelName.includes(itemModel)) {
+                          // Model match — WAJIB juga cek brand agar Gree tidak masuk kolom LG & sebaliknya
+                          // Jika item memiliki brand yang jelas, rowModelName harus mengandung brand tersebut
+                          if (!itemBrand || itemBrand === '-' || rowModelName.includes(itemBrand)) {
+                            isMatch = true;
+                          }
+                        } else if (itemBrand && itemBrand !== '-' && rowModelName.includes(itemBrand)) {
+                          // Brand match — pastikan model juga cocok (atau item tidak punya model spesifik)
+                          if (!itemModel || itemModel === 'standard') {
+                            // Jika kolom ini adalah tipe generic (Standard), JANGAN cocokkan jika log mutasi memiliki tipe/model spesifik (ditandai dengan kurung)
+                            if (!rowModelName.includes('(')) {
+                              isMatch = true;
+                            }
+                          } else if (rowModelName.includes(itemModel)) {
                             isMatch = true;
                           }
                         }

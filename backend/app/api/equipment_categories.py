@@ -15,13 +15,25 @@ router = APIRouter()
 
 @router.get("", response_model=List[CategoryResponse])
 async def list_categories(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    from app.models.asset_inventory import AssetInventory
+    from sqlalchemy import func
+    
     stmt = select(EquipmentCategory).order_by(EquipmentCategory.name)
     result = await db.execute(stmt)
+    categories = result.scalars().all()
     
-    categories = []
-    for cat in result.scalars().all():
-        setattr(cat, "available_stock", cat.initial_stock)
-        categories.append(cat)
+    if categories:
+        count_stmt = select(
+            AssetInventory.category_id, 
+            func.count(AssetInventory.id)
+        ).where(AssetInventory.status == 'available').group_by(AssetInventory.category_id)
+        
+        c_res = await db.execute(count_stmt)
+        counts = dict(c_res.fetchall())
+        
+        for cat in categories:
+            asset_count = counts.get(cat.id, 0)
+            setattr(cat, "available_stock", cat.initial_stock + asset_count)
         
     return categories
 
@@ -79,7 +91,23 @@ async def delete_category(category_id: uuid.UUID, db: AsyncSession = Depends(get
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
         
-    # Check if any equipment uses this category (optional, could also be handled by cascade or restricted by DB)
+    from sqlalchemy import delete, func
+    from app.models.equipment import Equipment
+    from app.models.slot_template import SlotTemplate
+    from app.models.asset_inventory import AssetInventory
+    from app.models.inventory_history_log import InventoryHistoryLog
+    
+    # Check if there are active equipments in denah
+    eqs_count = await db.execute(select(func.count(Equipment.id)).where(Equipment.category_id == category_id))
+    if eqs_count.scalar() > 0:
+        raise HTTPException(status_code=400, detail="Category is still being used by active equipments in denah")
+        
+    # Clear associated tables manually to avoid IntegrityError
+    await db.execute(delete(SlotTemplate).where(SlotTemplate.category_id == category_id))
+    await db.execute(delete(AssetInventory).where(AssetInventory.category_id == category_id))
+    await db.execute(delete(InventoryHistoryLog).where(InventoryHistoryLog.category_id == category_id))
+    
     await db.delete(category)
     await db.commit()
     return None
+

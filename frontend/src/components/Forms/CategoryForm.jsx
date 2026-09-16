@@ -567,20 +567,40 @@ const CategoryForm = ({ categories = [], onSubmit, onUpdate, onDelete, onCancel 
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <label style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', fontWeight: '500' }}>Warna Penanda</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '4px' }}>
+              {[
+                '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', 
+                '#22c55e', '#10b981', '#14b8a6', '#0ea5e9', '#3b82f6', 
+                '#6366f1', '#8b5cf6', '#d946ef', '#ec4899', '#64748b'
+              ].map(c => (
+                <div 
+                  key={c}
+                  onClick={() => setColor(c)}
+                  style={{
+                    width: '30px', height: '30px', borderRadius: '50%', backgroundColor: c,
+                    cursor: 'pointer',
+                    border: color === c ? '2px solid white' : '2px solid transparent',
+                    boxShadow: color === c ? `0 0 0 2px ${c}` : '0 2px 4px rgba(0,0,0,0.1)',
+                    transform: color === c ? 'scale(1.15)' : 'scale(1)',
+                    transition: 'all 0.2s ease'
+                  }}
+                  title={c}
+                />
+              ))}
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <input 
-                type="color" 
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-                style={{ 
-                  width: '40px', 
-                  height: '40px',
-                  padding: '0',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer'
-                }}
-              />
+              <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', fontWeight: '500' }}>Warna Kustom:</span>
+              <div style={{ 
+                width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', 
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)', border: '2px solid white'
+              }}>
+                <input 
+                  type="color" 
+                  value={color}
+                  onChange={(e) => setColor(e.target.value)}
+                  style={{ width: '150%', height: '150%', margin: '-25%', padding: 0, border: 'none', cursor: 'pointer' }}
+                />
+              </div>
               <span style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>{color}</span>
             </div>
           </div>

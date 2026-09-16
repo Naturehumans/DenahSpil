@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Header from './Header';
 import LeftSidebar from './LeftSidebar';
 import RightSidebar from './RightSidebar';
@@ -27,14 +27,26 @@ const MainLayout = ({
   onEquipmentDoubleClick,
   highlightedSlotId = null,
   isEditMode = false,
-  selectedCategoryId,
+  selectedCategoryIds,
   onSelectCategory,
   slots = [],
   onDeleteSlot,
-  onSelectMobileSlotTemplate
+  onSelectMobileSlotTemplate,
+  isDrawingPolygon,
+  setIsDrawingPolygon,
+  currentPolygon,
+  setCurrentPolygon,
+  onPolygonComplete,
+  isAdmin = true
 }) => {
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
+
+  useEffect(() => {
+    const handleToggle = () => setRightOpen(prev => !prev);
+    window.addEventListener('toggle-right-sidebar', handleToggle);
+    return () => window.removeEventListener('toggle-right-sidebar', handleToggle);
+  }, []);
 
   return (
     <div className="main-layout" style={{
@@ -69,6 +81,17 @@ const MainLayout = ({
               isOpen={leftOpen} 
               onClose={() => setLeftOpen(false)} 
               categories={categories}
+              buildings={buildings}
+              currentBuilding={currentBuilding}
+              onSelectBuilding={onSelectBuilding}
+              floors={floors}
+              currentFloor={currentFloor}
+              onSelectFloor={onSelectFloor}
+              isDrawingPolygon={isDrawingPolygon}
+              setIsDrawingPolygon={setIsDrawingPolygon}
+              currentPolygon={currentPolygon}
+              setCurrentPolygon={setCurrentPolygon}
+              onPolygonComplete={onPolygonComplete}
             />
           ) : (
             <LeftSidebar 
@@ -82,7 +105,7 @@ const MainLayout = ({
               onSelectFloor={onSelectFloor}
               equipments={equipments}
               categories={categories}
-              selectedCategoryId={selectedCategoryId}
+              selectedCategoryIds={selectedCategoryIds}
               onSelectCategory={onSelectCategory}
             />
           )}
@@ -175,6 +198,7 @@ const MainLayout = ({
           onManageEquipments={onManageEquipments}
           onManageHistory={onManageHistory}
           onManageInventory={onManageInventory}
+          isAdmin={isAdmin}
         />
       </div>
 
