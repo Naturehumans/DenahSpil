@@ -72,7 +72,7 @@ const Header = ({ onMenuClick, onAlertClick, alertsCount }) => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ textAlign: 'right', display: 'none' }} id="user-info">
             <p style={{ margin: 0, fontSize: '0.875rem', fontWeight: '600', color: 'white' }}>{user?.username || 'User'}</p>
-            <p style={{ margin: 0, fontSize: '0.75rem', color: 'rgba(255,255,255,0.8)' }}>Administrator</p>
+            <p style={{ margin: 0, fontSize: '0.75rem', color: 'rgba(255,255,255,0.8)' }}>{user?.role === 'admin' ? 'Administrator' : 'Viewer'}</p>
           </div>
 
           <div style={{ width: '1px', height: '24px', background: 'rgba(255,255,255,0.2)' }} />

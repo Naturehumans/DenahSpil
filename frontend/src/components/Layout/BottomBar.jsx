@@ -90,27 +90,23 @@ const BottomBar = ({ isEditMode = false, onManageFloors, onManageEquipments, onM
           </div>
         )}
 
-        {/* Inventori - Admin Only */}
-        {isAdmin && (
-          <>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-              <button
-                className="neu-action-btn"
-                onClick={onManageInventory}
-                style={{
-                  width: '48px', height: '48px', padding: 0,
-                  borderRadius: '50%', background: 'transparent',
-                  border: 'none',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center'
-                }}>
-                <Box size={20} color="#8b5cf6" />
-              </button>
-              <span style={{ fontSize: '0.7rem', fontWeight: '600', color: 'var(--color-text-secondary)' }}>Inventori</span>
-            </div>
+        {/* Inventori - Semua user (Read Only untuk non-admin) */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+          <button
+            className="neu-action-btn"
+            onClick={onManageInventory}
+            style={{
+              width: '48px', height: '48px', padding: 0,
+              borderRadius: '50%', background: 'transparent',
+              border: 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
+            <Box size={20} color="#8b5cf6" />
+          </button>
+          <span style={{ fontSize: '0.7rem', fontWeight: '600', color: 'var(--color-text-secondary)' }}>Inventori</span>
+        </div>
 
-            <div style={{ width: '2px', height: '32px', background: 'var(--color-text-muted)', opacity: 0.3, borderRadius: '2px' }}></div>
-          </>
-        )}
+        <div style={{ width: '2px', height: '32px', background: 'var(--color-text-muted)', opacity: 0.3, borderRadius: '2px' }}></div>
 
         {/* History - Semua user */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>

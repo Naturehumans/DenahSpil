@@ -59,11 +59,8 @@ const InventoryPage = () => {
   const { isAdmin } = useAuth();
 
   useEffect(() => {
-    if (isAdmin === false) {
-      showToast('Akses ditolak. Anda hanya memiliki akses baca.', 'error');
-      navigate('/dashboard');
-    }
-  }, [isAdmin, navigate, showToast]);
+    // Non-admins can now view the inventory page (read-only)
+  }, [isAdmin]);
 
   const handleDeleteBrand = (item, e) => {
     if (e) {
