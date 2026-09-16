@@ -658,7 +658,7 @@ async def replace_equipment_in_slot(
         brand=brand,
         model_number=model_number,
         status="Dipasang",
-        location_info=f'Penempatan/Penggantian di {bldg_name} - {flr_name}{rm_suffix}',
+        location_info=f'"{eq.name}" Penempatan/Penggantian di {bldg_name} - {flr_name}{rm_suffix}',
         performed_by=current_user.id
     )
     if action_date:
