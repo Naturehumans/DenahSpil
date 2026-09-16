@@ -21,7 +21,10 @@ import {
   PackageCheck,
   PlusCircle,
   LayoutGrid,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ArrowUp,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 const HistoryPage = () => {
@@ -54,6 +57,13 @@ const HistoryPage = () => {
   const [sortAsc, setSortAsc] = useState(false);
 
   const [selectedLogTimeline, setSelectedLogTimeline] = useState(null);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 100;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedBuilding, selectedFloor, selectedCategoryId, selectedCondition, sortField, sortAsc]);
 
   const matrixExportRef = useRef(null);
   const usageExportRef = useRef(null);
@@ -267,6 +277,9 @@ const HistoryPage = () => {
     if (valA > valB) return sortAsc ? 1 : -1;
     return 0;
   });
+
+  const totalPages = Math.ceil(sortedLogs.length / itemsPerPage) || 1;
+  const paginatedLogs = sortedLogs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const handleSort = (field) => {
     if (sortField === field) {
@@ -781,8 +794,9 @@ const HistoryPage = () => {
               <p style={{ margin: 0, fontSize: '0.875rem' }}>Belum ada log yang sesuai dengan pencarian Anda.</p>
             </div>
           ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ 
+            <>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ 
                 width: '100%', 
                 borderCollapse: 'collapse', 
                 textAlign: 'left',
@@ -825,7 +839,7 @@ const HistoryPage = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedLogs.map((log, index) => {
+                  {paginatedLogs.map((log, index) => {
                     const statusStyle = getStatusStyle(log);
                     const isEven = index % 2 === 0;
 
@@ -930,9 +944,34 @@ const HistoryPage = () => {
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+                  </tbody>
+                </table>
+              </div>
+
+              {totalPages > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginTop: '20px', gap: '15px' }}>
+                  <button 
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="neu-action-btn"
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '10px', border: 'none', background: currentPage === 1 ? '#e2e8f0' : 'var(--color-primary)', color: currentPage === 1 ? '#94a3b8' : 'white', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', fontWeight: '600', transition: 'all 0.2s' }}
+                  >
+                    <ChevronLeft size={18} /> Prev
+                  </button>
+                  <span style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--color-text)', background: 'white', padding: '8px 16px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                    Halaman {currentPage} dari {totalPages}
+                  </span>
+                  <button 
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="neu-action-btn"
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '10px', border: 'none', background: currentPage === totalPages ? '#e2e8f0' : 'var(--color-primary)', color: currentPage === totalPages ? '#94a3b8' : 'white', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', fontWeight: '600', transition: 'all 0.2s' }}
+                  >
+                    Next <ChevronRight size={18} />
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
         </>
@@ -993,6 +1032,33 @@ const HistoryPage = () => {
           </div>
         </div>
       )}
+
+      {/* Back to Top Button */}
+      <button 
+        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        className="neu-action-btn"
+        style={{ 
+          position: 'fixed', 
+          bottom: '30px', 
+          right: '30px', 
+          width: '50px', 
+          height: '50px', 
+          borderRadius: '50%', 
+          background: 'var(--color-primary)', 
+          color: 'white', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          border: 'none', 
+          cursor: 'pointer', 
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)', 
+          zIndex: 100 
+        }}
+        title="Kembali ke atas"
+      >
+        <ArrowUp size={24} /> 
+      </button>
+
     </div>
   );
 };

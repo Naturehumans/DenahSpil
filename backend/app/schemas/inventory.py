@@ -10,6 +10,11 @@ class AssetRestoreRequest(BaseModel):
     brand: Optional[str] = None
     model_number: Optional[str] = None
 
+class BrandActionRequest(BaseModel):
+    category_id: str
+    brand: Optional[str] = None
+    model_number: Optional[str] = None
+
 class AssetInventoryBase(BaseModel):
     category_id: uuid.UUID
     asset_id: str

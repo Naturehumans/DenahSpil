@@ -609,20 +609,15 @@ const FloorCanvas = ({
     e.preventDefault();
     if (!isEditMode) return;
     
-    try {
-      if (stageRef.current) {
-        stageRef.current.setPointersPositions(e);
-      }
-    } catch (err) {
-      console.warn('Konva setPointersPositions error:', err);
-    }
-    
-    let pos = stageRef.current ? stageRef.current.getPointerPosition() : null;
-    if (!pos && e.nativeEvent) {
-       pos = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY };
-    }
-    if (!pos) {
-       pos = { x: 400, y: 300 }; // safe fallback
+    let pos = null;
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      pos = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+    } else {
+      pos = { x: 400, y: 300 }; // safe fallback
     }
 
     const x = (pos.x - stageState.x) / stageState.scale;

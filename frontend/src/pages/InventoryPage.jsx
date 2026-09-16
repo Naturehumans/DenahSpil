@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getCategories, createCategory, updateCategory, deleteCategory } from '../api/categories';
 import { getAllEquipments } from '../api/equipments';
-import { getInventoryLogs, addStockToInventory, getAssets, restoreAsset, deleteAsset } from '../api/inventory';
+import { getInventoryLogs, addStockToInventory, getAssets, restoreAsset, deleteAsset, deleteAssetsByBrand, deleteOneAssetByBrand } from '../api/inventory';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Search, Package, PackageX, Wrench, Trash2, ArrowLeft, Plus, Minus, Check, X, MapPin, History, Tag, Edit2, AlertTriangle } from 'lucide-react';
@@ -49,6 +49,7 @@ const InventoryPage = () => {
   // Stock & Damaged modals
   const [addStockModal, setAddStockModal] = useState(null);
   const [stockToAdd, setStockToAdd] = useState(1);
+  const [acType, setAcType] = useState('in_out');
   const [confirmDeleteDamaged, setConfirmDeleteDamaged] = useState(null);
   const [confirmDeleteBrand, setConfirmDeleteBrand] = useState(null);
   const [itemHistoryModal, setItemHistoryModal] = useState(null);
@@ -69,46 +70,19 @@ const InventoryPage = () => {
   const confirmDeleteBrandAction = async () => {
     if (!confirmDeleteBrand) return;
     const item = confirmDeleteBrand;
-
     try {
-      // Find all available assets that match this brand's category, brand, and model
-      const assetsToDelete = availableAssets.filter(a => 
-        String(a.category_id) === String(item.category_id) && 
-        (a.brand || '').toLowerCase() === (item.brand || '').toLowerCase() &&
-        (a.model_number || '').toLowerCase() === (item.model_number || '').toLowerCase()
-      );
-      
-      // Delete them sequentially via API
-      for (const asset of assetsToDelete) {
-        try {
-          await deleteAsset(asset.id);
-        } catch (e) {
-          console.error("Failed to delete asset:", asset.id, e);
-        }
-      }
-
-      // Also remove from local storage spil_category_brands
-      const localBrandsStr = localStorage.getItem('spil_category_brands');
-      if (localBrandsStr) {
-        try {
-          const parsed = JSON.parse(localBrandsStr);
-          const catKey = (item.category_name || '').toLowerCase();
-          if (parsed[catKey]) {
-            parsed[catKey] = parsed[catKey].filter(b => 
-              !( (b.brand || '').toLowerCase() === (item.brand || '').toLowerCase() &&
-                 (b.model_number || '').toLowerCase() === (item.model_number || '').toLowerCase() )
-            );
-            localStorage.setItem('spil_category_brands', JSON.stringify(parsed));
-          }
-        } catch(e) { console.error(e) }
-      }
+      await deleteAssetsByBrand({
+        category_id: item.category_id,
+        brand: item.brand === 'Tanpa Merk' ? undefined : item.brand,
+        model_number: item.model_number === 'Standard' ? undefined : item.model_number,
+      });
 
       showToast(`Merk ${item.brand} berhasil dibuang & dicatat dalam riwayat log`, 'success');
       setConfirmDeleteBrand(null);
       await fetchData(false);
     } catch (err) {
-      console.error(err);
-      showToast('Gagal membuang stok barang', 'error');
+      console.error('Delete brand error:', err.response?.data || err);
+      showToast('Gagal membuang stok barang: ' + (err.response?.data?.detail || err.message), 'error');
     }
   };
   
@@ -148,15 +122,12 @@ const InventoryPage = () => {
       // Load Available Assets from Backend
       setAvailableAssets(assets || []);
       
-      // Group available assets into brandInventory format
+      // Group available assets into brandInventory format.
+      // SOURCE OF TRUTH: Only backend AssetInventory records create brand cards.
+      // localStorage is only used to enrich metadata (warranty, min_stock).
       let map = {};
       if (assets && Array.isArray(assets)) {
         assets.forEach(asset => {
-          let partType = '';
-          let partName = '';
-          // REMOVED appending partName to model_number so they group together
-          // We will store the assets, and UI can display IN/OUT based on asset.ac_type
-          
           const baseModel = (asset.model_number || 'Standard');
           const key = `${asset.category_id}_${(asset.brand || 'Tanpa Merk').toLowerCase()}_${baseModel.toLowerCase()}`;
           if (!map[key]) {
@@ -168,7 +139,7 @@ const InventoryPage = () => {
               brand: asset.brand || 'Tanpa Merk',
               model_number: baseModel,
               original_model: baseModel,
-              ac_type: 'in_out', // Set a default or derived type if needed
+              ac_type: 'in_out',
               stock: 0,
               asset_count: 0,
               min_stock: 1,
@@ -178,12 +149,27 @@ const InventoryPage = () => {
               assets: []
             };
           }
-          map[key].asset_count += 1;
+          const isAC = (asset.category?.name || '').toUpperCase().includes('AC');
+          if (isAC) {
+             if (!map[key].ac_base_ids) map[key].ac_base_ids = new Set();
+             let baseId = asset.asset_id || '';
+             if (baseId.endsWith('-IN')) baseId = baseId.replace('-IN', '');
+             if (baseId.endsWith('-OUT')) baseId = baseId.replace('-OUT', '');
+             map[key].ac_base_ids.add(baseId);
+             map[key].asset_count = map[key].ac_base_ids.size;
+          } else {
+             map[key].asset_count += 1;
+          }
           map[key].assets.push(asset);
         });
       }
 
-      // Merge local storage spil_category_brands so edited items in dashboard appear here
+      // Set stock = asset_count for all items (backend is the source of truth for quantity)
+      Object.keys(map).forEach(key => {
+        map[key].stock = map[key].asset_count;
+      });
+
+      // Enrich with metadata from localStorage (warranty, min_stock only — do NOT add new cards)
       const localBrands = localStorage.getItem('spil_category_brands');
       if (localBrands) {
         try {
@@ -194,48 +180,17 @@ const InventoryPage = () => {
               const catId = b.category_id || (cat ? cat.id : catNameKey);
               const baseModel = b.model_number || 'Standard';
               const key = `${catId}_${(b.brand || 'Tanpa Merk').toLowerCase()}_${baseModel.toLowerCase()}`;
-              
-              if (!map[key]) {
-                map[key] = {
-                  id: b.id || `b_${catId}_${b.brand}_${baseModel}`,
-                  category_id: catId,
-                  category_name: cat?.name || catNameKey,
-                  category_color: cat?.color || '#3b82f6',
-                  brand: b.brand || 'Tanpa Merk',
-                  model_number: baseModel,
-                  original_model: baseModel,
-                  stock: 0,
-                  asset_count: 0,
-                  min_stock: parseInt(b.min_stock) || 1,
-                  warranty_months: parseInt(b.warranty_months) || 0,
-                  purchase_date: null,
-                  expired_date: null,
-                  assets: []
-                };
+              // Only enrich existing backend-sourced entries — do NOT create new ones
+              if (map[key]) {
+                map[key].min_stock = Math.max(map[key].min_stock, parseInt(b.min_stock) || 0);
+                map[key].warranty_months = Math.max(map[key].warranty_months, parseInt(b.warranty_months) || 0);
               }
-              // The true stock is either the local storage stock OR the asset count, whichever is larger 
-              // (because local storage already includes unassigned items, and initial stock)
-              // Actually, local storage b.stock IS the total stock intended by the user
-              map[key].stock = parseInt(b.stock) || 0;
-              // Ensure stock is at least the number of physical assets we have in the backend
-              if (map[key].stock < map[key].asset_count) {
-                  map[key].stock = map[key].asset_count;
-              }
-              map[key].min_stock = Math.max(map[key].min_stock, parseInt(b.min_stock) || 0);
-              map[key].warranty_months = Math.max(map[key].warranty_months, parseInt(b.warranty_months) || 0);
             });
           });
         } catch (err) {
           console.error("Failed to parse spil_category_brands", err);
         }
       }
-
-      // Ensure all items have stock >= asset_count (especially those not in localStorage)
-      Object.keys(map).forEach(key => {
-        if ((map[key].stock || 0) < (map[key].asset_count || 0)) {
-          map[key].stock = map[key].asset_count;
-        }
-      });
 
       const sortedBrandInventory = Object.values(map).sort((a, b) => {
         const catCmp = (a.category_name || '').localeCompare(b.category_name || '');
@@ -429,6 +384,15 @@ const InventoryPage = () => {
 
   const handleQuickAddStock = async (item, e) => {
     e.stopPropagation();
+    
+    const isAC = (item.category_name || '').toUpperCase().includes('AC');
+    if (isAC) {
+      setAddStockModal(item);
+      setStockToAdd(1);
+      setAcType(item.ac_type || 'in_out');
+      return;
+    }
+
     try {
       await addStockToInventory({
         category_id: item.category_id,
@@ -468,40 +432,26 @@ const InventoryPage = () => {
     e.stopPropagation();
     if (item.stock <= 0) return;
     try {
-      const assetToRemove = (item.assets && item.assets.length > 0) ? item.assets[0] : availableAssets.find(a => 
-        String(a.category_id) === String(item.category_id) && 
-        (a.brand || 'Tanpa Merk').toLowerCase() === (item.brand || 'Tanpa Merk').toLowerCase() &&
-        (a.model_number || 'Standard').toLowerCase() === (item.original_model || item.model_number || 'Standard').toLowerCase()
-      );
-      if (assetToRemove) {
-        await deleteAsset(assetToRemove.id);
+      const result = await deleteOneAssetByBrand({
+        category_id: item.category_id,
+        brand: item.brand === 'Tanpa Merk' ? undefined : item.brand,
+        model_number: item.model_number === 'Standard' ? undefined : item.model_number,
+      });
+
+      if (result.deleted > 0) {
         showToast(`1 Stok ${item.brand || ''} berhasil dikurangi`, 'success');
         fetchData(false);
       } else {
-        // Fallback to reduce from local storage if no backend asset
-        const localBrandsStr = localStorage.getItem('spil_category_brands');
-        if (localBrandsStr) {
-          const parsed = JSON.parse(localBrandsStr);
-          const catKey = (item.category_name || '').toLowerCase();
-          if (parsed[catKey]) {
-            const existingBrand = parsed[catKey].find(b => 
-              (b.brand || '').toLowerCase() === (item.brand || '').toLowerCase() &&
-              (b.model_number || '').toLowerCase() === (item.model_number || '').toLowerCase()
-            );
-            if (existingBrand && existingBrand.stock > 0) {
-              existingBrand.stock -= 1;
-              localStorage.setItem('spil_category_brands', JSON.stringify(parsed));
-              showToast(`1 Stok ${item.brand || ''} berhasil dikurangi (lokal)`, 'success');
-              fetchData(false);
-              return;
-            }
-          }
-        }
+        showToast('Tidak ada stok tersedia untuk dikurangi', 'warning');
       }
     } catch (err) {
-      showToast('Gagal mengurangi stok', 'error');
+      const errMsg = Array.isArray(err.response?.data?.detail) 
+        ? err.response.data.detail.map(d => d.msg).join(', ') 
+        : (err.response?.data?.detail || err.message);
+      showToast('Gagal mengurangi stok: ' + errMsg, 'error');
     }
   };
+
 
   const handleAddStockSubmit = async (e) => {
     e.preventDefault();
@@ -1655,19 +1605,37 @@ const InventoryPage = () => {
             
             <form onSubmit={handleAddStockSubmit}>
               <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.875rem', fontWeight: '600', color: 'var(--color-text)' }}>
-                  Jumlah Stok Masuk
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', fontWeight: '500' }}>
+                  Jumlah Stok Baru
                 </label>
                 <input 
                   type="number" 
                   min="1"
                   value={stockToAdd}
                   onChange={(e) => setStockToAdd(e.target.value)}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '1rem', outline: 'none' }}
+                  style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '1rem', outline: 'none' }}
                   autoFocus
                   required
                 />
               </div>
+
+              {(addStockModal.category_name || '').toUpperCase().includes('AC') && (
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', fontWeight: '500' }}>
+                    Unit AC
+                  </label>
+                  <select
+                    value={acType}
+                    onChange={(e) => setAcType(e.target.value)}
+                    style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '1rem', outline: 'none', background: 'white' }}
+                  >
+                    <option value="in_out">Keduanya (Indoor + Outdoor)</option>
+                    <option value="in">Indoor Saja</option>
+                    <option value="out">Outdoor Saja</option>
+                  </select>
+                </div>
+              )}
+
               <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
                 <button type="button" onClick={() => setAddStockModal(null)} className="neu-action-btn" style={{ padding: '8px 16px', borderRadius: '8px', background: 'transparent', border: 'none', cursor: 'pointer' }}>Batal</button>
                 <button type="submit" className="neu-action-btn" style={{ padding: '8px 16px', borderRadius: '8px', background: 'var(--color-primary)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: '600' }}>Simpan Stok</button>

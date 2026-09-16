@@ -98,16 +98,18 @@ async def create_slot(
 
     # Generate slot_code (ID Tempat / ID Lokasi e.g. GUL11)
     b_abbr = abbreviate(flr.building.name) if flr.building else "GU"
-    c_abbr = abbreviate(cat.name)
-    flr_num = flr.floor_number
+    flr_abbr = abbreviate(flr.name) if flr else ""
+    rm_abbr = abbreviate(slot_in.room_name) if slot_in.room_name else ""
     
-    count_res = await db.execute(
-        select(func.count(SlotTemplate.id))
-        .where(SlotTemplate.floor_id == floor_id)
-        .where(SlotTemplate.category_id == slot_in.category_id)
-    )
+    query = select(func.count(SlotTemplate.id)).where(SlotTemplate.floor_id == floor_id)
+    if slot_in.room_name:
+        query = query.where(SlotTemplate.room_name == slot_in.room_name)
+    else:
+        query = query.where(SlotTemplate.room_name.is_(None))
+        
+    count_res = await db.execute(query)
     s_count = (count_res.scalar() or 0) + 1
-    generated_slot_code = f"{b_abbr}{c_abbr}{flr_num}{s_count}"
+    generated_slot_code = f"{b_abbr}{flr_abbr}{rm_abbr}{s_count:03d}"
 
     db_slot = SlotTemplate(
         floor_id=floor_id,
@@ -277,18 +279,22 @@ async def assign_equipment_to_slot(
 
     # Generate abbreviation variables needed for slot_code
     bldg_abbr = abbreviate(slot.floor.building.name) if (slot.floor and slot.floor.building) else "GU"
-    cat_abbr = abbreviate(cat.name)
-    floor_num = slot.floor.floor_number if slot.floor else 1
-    cat_clean = cat.name.replace(" ", "")
+    flr_abbr = abbreviate(slot.floor.name) if slot.floor else ""
+    rm_abbr = abbreviate(slot.room_name) if slot.room_name else ""
 
     if not slot.slot_code:
-        slot_count_res = await db.execute(
-            select(func.count(SlotTemplate.id))
-            .where(SlotTemplate.floor_id == slot.floor_id)
-            .where(SlotTemplate.category_id == cat.id)
+        query = select(func.count(SlotTemplate.id)).where(
+            SlotTemplate.floor_id == slot.floor_id,
+            SlotTemplate.slot_code.isnot(None)
         )
-        s_cnt = slot_count_res.scalar() or 1
-        slot.slot_code = f"{bldg_abbr}{cat_abbr}{floor_num}{s_cnt}"
+        if slot.room_name:
+            query = query.where(SlotTemplate.room_name == slot.room_name)
+        else:
+            query = query.where(SlotTemplate.room_name.is_(None))
+            
+        slot_count_res = await db.execute(query)
+        s_cnt = (slot_count_res.scalar() or 0) + 1
+        slot.slot_code = f"{bldg_abbr}{flr_abbr}{rm_abbr}{s_cnt:03d}"
 
     # Create equipment
     new_equipment = Equipment(
@@ -540,7 +546,6 @@ async def replace_equipment_in_slot(
     if destination == 'good':
         status_text = 'Inventori Baru'
         action_type = 'restock'
-        if not cat.has_id: cat.initial_stock += 1
     elif destination == 'damaged':
         status_text = 'Inventori Rusak'
         action_type = 'damage'
@@ -571,20 +576,21 @@ async def replace_equipment_in_slot(
         parts_to_unassign = [(None, item_code)]
 
     for p_type, old_asset_id in parts_to_unassign:
-        if cat.has_id:
-            if destination in ['good', 'damaged']:
+        if destination in ['good', 'damaged']:
+            new_status = 'available' if destination == 'good' else 'damaged'
+            existing_inv_res = await db.execute(select(AssetInventory).where(AssetInventory.asset_id == old_asset_id))
+            existing_inv = existing_inv_res.scalars().first()
+            if existing_inv:
+                existing_inv.status = new_status
+            else:
                 asset_inv = AssetInventory(
                     category_id=cat.id,
                     asset_id=old_asset_id,
-                    status='available' if destination == 'good' else 'damaged',
+                    status=new_status,
                     brand=eq.brand if eq else None,
                     model_number=eq.model_number if eq else None,
                     ac_type=p_type
                 )
-                if action_date:
-                    from datetime import datetime
-                    try: asset_inv.created_at = datetime.fromisoformat(action_date)
-                    except ValueError: pass
                 db.add(asset_inv)
 
         log = InventoryHistoryLog(
@@ -715,8 +721,6 @@ async def unassign_equipment_from_slot(
     if destination == 'good':
         status_text = 'Inventori Baru'
         action_type = 'restock'
-        if cat and not cat.has_id:
-            cat.initial_stock += 1
     elif destination == 'damaged':
         status_text = 'Inventori Rusak'
         action_type = 'damage'
@@ -739,24 +743,23 @@ async def unassign_equipment_from_slot(
         parts_to_unassign = [(None, item_code)]
 
     for p_type, asset_id in parts_to_unassign:
-        # Save to AssetInventory if permanent ID asset
-        if cat and cat.has_id:
+        if cat:
             if destination in ['good', 'damaged']:
-                asset_inv = AssetInventory(
-                    category_id=cat.id,
-                    asset_id=asset_id,
-                    status='available' if destination == 'good' else 'damaged',
-                    brand=eq.brand if eq else None,
-                    model_number=eq.model_number if eq else None,
-                    ac_type=p_type
-                )
-                if action_date:
-                    from datetime import datetime
-                    try:
-                        asset_inv.created_at = datetime.fromisoformat(action_date)
-                    except ValueError:
-                        pass
-                db.add(asset_inv)
+                new_status = 'available' if destination == 'good' else 'damaged'
+                existing_inv_res = await db.execute(select(AssetInventory).where(AssetInventory.asset_id == asset_id))
+                existing_inv = existing_inv_res.scalars().first()
+                if existing_inv:
+                    existing_inv.status = new_status
+                else:
+                    asset_inv = AssetInventory(
+                        category_id=cat.id,
+                        asset_id=asset_id,
+                        status=new_status,
+                        brand=eq.brand if eq else None,
+                        model_number=eq.model_number if eq else None,
+                        ac_type=p_type
+                    )
+                    db.add(asset_inv)
 
         # Save to InventoryHistoryLog for /history view ONLY if category exists
         if cat:

@@ -9,7 +9,7 @@ from app.database import get_db
 from app.models.asset_inventory import AssetInventory
 from app.models.inventory_history_log import InventoryHistoryLog
 from app.models.user import User
-from app.schemas.inventory import AssetInventoryResponse, InventoryHistoryLogResponse, AssetRestoreRequest
+from app.schemas.inventory import AssetInventoryResponse, InventoryHistoryLogResponse, AssetRestoreRequest, BrandActionRequest
 from app.api.deps import get_current_user
 
 router = APIRouter()
@@ -168,6 +168,117 @@ async def add_stock(data: dict, db: AsyncSession = Depends(get_db), current_user
         
     await db.commit()
     return {"success": True}
+
+@router.post("/assets/delete-brand", status_code=status.HTTP_200_OK)
+async def delete_assets_by_brand(
+    request: BrandActionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete all AssetInventory records matching category + brand + model."""
+    try:
+        cat_uuid = uuid.UUID(request.category_id)
+    except ValueError:
+        return {"deleted": 0}
+
+    from sqlalchemy import and_
+    query = select(AssetInventory).options(selectinload(AssetInventory.category)).where(
+        AssetInventory.category_id == cat_uuid
+    )
+    if request.brand:
+        query = query.where(AssetInventory.brand == request.brand)
+    if request.model_number:
+        query = query.where(AssetInventory.model_number == request.model_number)
+    
+    result = await db.execute(query)
+    assets = result.scalars().all()
+    
+    deleted_count = 0
+    for asset in assets:
+        log = InventoryHistoryLog(
+            category_id=asset.category_id,
+            asset_id=asset.asset_id,
+            brand=asset.brand,
+            model_number=asset.model_number,
+            action_type='remove',
+            status='Dibuang',
+            location_info=f"Dihapus permanen dari gudang (merk {request.brand or '-'})",
+            performed_by=current_user.id
+        )
+        db.add(log)
+        await db.delete(asset)
+        deleted_count += 1
+    
+    await db.commit()
+    return {"deleted": deleted_count}
+
+@router.post("/assets/reduce-stock", status_code=status.HTTP_200_OK)
+async def delete_one_asset_by_brand(
+    request: BrandActionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a single AssetInventory record matching category + brand + model."""
+    try:
+        cat_uuid = uuid.UUID(request.category_id)
+    except ValueError:
+        return {"deleted": 0}
+
+    from sqlalchemy import and_
+    query = select(AssetInventory).options(selectinload(AssetInventory.category)).where(
+        AssetInventory.category_id == cat_uuid
+    )
+    if request.brand:
+        query = query.where(AssetInventory.brand == request.brand)
+    if request.model_number:
+        query = query.where(AssetInventory.model_number == request.model_number)
+    
+    result = await db.execute(query.limit(2))  # Fetch 2 to detect AC pair
+    assets = result.scalars().all()
+    if not assets:
+        return {"deleted": 0}
+    
+    # For AC: delete the pair (IN + OUT share a base ID)
+    cat_res = await db.execute(select(AssetInventory.category_id).where(AssetInventory.id == assets[0].id))
+    from app.models.equipment_category import EquipmentCategory
+    cat_r = await db.execute(select(EquipmentCategory).where(EquipmentCategory.id == cat_uuid))
+    cat = cat_r.scalars().first()
+    is_ac = 'AC' in (cat.name if cat else '').upper()
+    
+    to_delete = []
+    if is_ac:
+        # Find base ID of first asset and delete all with same base
+        base_id = assets[0].asset_id or ''
+        if base_id.endswith('-IN'): base_id = base_id[:-3]
+        if base_id.endswith('-OUT'): base_id = base_id[:-4]
+        
+        pair_query = select(AssetInventory).where(
+            AssetInventory.category_id == cat_uuid,
+            AssetInventory.asset_id.in_([f"{base_id}-IN", f"{base_id}-OUT", base_id])
+        )
+        pair_res = await db.execute(pair_query)
+        to_delete = pair_res.scalars().all()
+    else:
+        to_delete = [assets[0]]
+    
+    deleted_count = 0
+    for asset in to_delete:
+        log = InventoryHistoryLog(
+            category_id=asset.category_id,
+            asset_id=asset.asset_id,
+            brand=asset.brand,
+            model_number=asset.model_number,
+            action_type='remove',
+            status='Dikurangi',
+            location_info=f"Stok dikurangi 1 unit (merk {request.brand or '-'})",
+            performed_by=current_user.id
+        )
+        db.add(log)
+        await db.delete(asset)
+        deleted_count += 1
+    
+    await db.commit()
+    return {"deleted": deleted_count}
 
 @router.delete("/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_asset_real(asset_id: uuid.UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
