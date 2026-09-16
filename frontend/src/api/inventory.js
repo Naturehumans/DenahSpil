@@ -16,13 +16,6 @@ export const deleteAsset = async (assetId) => {
   return response.data;
 };
 
-<<<<<<< HEAD
-export const addStockToInventory = async (data) => {
-  const response = await api.post('/inventory/stock', data);
-=======
-/**
- * Delete ALL assets matching a category + brand + model (bulk delete entire brand card)
- */
 export const deleteAssetsByBrand = async (data) => {
   const response = await api.post('/assets/delete-brand', data);
   return response.data;
@@ -38,7 +31,6 @@ export const deleteOneAssetByBrand = async (data) => {
 
 export const addStockToInventory = async (data) => {
   const response = await api.post('/assets/add-stock', data);
->>>>>>> updatev2
   return response.data;
 };
 

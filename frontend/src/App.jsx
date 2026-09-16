@@ -11,9 +11,6 @@ const ForgotPasswordPage = React.lazy(() => import('./pages/ForgotPasswordPage')
 const DashboardPage = React.lazy(() => import('./pages/DashboardPage'));
 const HistoryPage = React.lazy(() => import('./pages/HistoryPage'));
 const InventoryPage = React.lazy(() => import('./pages/InventoryPage'));
-<<<<<<< HEAD
-=======
-
 function AnimatedRoutes() {
   const location = useLocation();
   
@@ -36,8 +33,6 @@ function AnimatedRoutes() {
     </AnimatePresence>
   );
 }
->>>>>>> updatev2
-
 function App() {
   return (
     <ErrorBoundary>
@@ -47,24 +42,7 @@ function App() {
             <Skeleton variant="card" width="300px" height="200px" />
           </div>
         }>
-<<<<<<< HEAD
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            
-            {/* Protected Routes */}
-            <Route element={<ProtectedRoute />}>
-              <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/history" element={<HistoryPage />} />
-              <Route path="/inventory" element={<InventoryPage />} />
-            </Route>
-
-            {/* Redirect root to dashboard */}
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
-=======
           <AnimatedRoutes />
->>>>>>> updatev2
         </Suspense>
       </BrowserRouter>
     </ErrorBoundary>
