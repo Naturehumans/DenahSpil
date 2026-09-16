@@ -27,9 +27,12 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
 
   useEffect(() => {
     if (onRegisterExport) {
-      onRegisterExport(handleExportXLSX);
+      onRegisterExport((format) => {
+        if (format === 'pdf') handleExportPDF();
+        else handleExportXLSX();
+      });
     }
-  }, []);
+  });
 
   const loadMatrixData = async () => {
     setLoading(true);
@@ -299,8 +302,65 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
       XLSX.writeFile(workbook, `Dashboard_Aset_SpilDenah_${new Date().toISOString().slice(0,10)}.xlsx`);
       showToast('Dashboard Aset berhasil di-export ke format Excel (.xlsx)', 'success');
     } catch (err) {
-      console.error('XLSX Export Error:', err);
+      console.error(err);
       showToast('Gagal memuat export Excel', 'error');
+    }
+  };
+
+  const handleExportPDF = async () => {
+    try {
+      const { jsPDF } = await import('jspdf');
+      await import('jspdf-autotable');
+      
+      const doc = new jsPDF('landscape');
+      
+      doc.setFontSize(14);
+      doc.text('DASHBOARD ASET', 14, 15);
+      
+      const todayDate = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: '2-digit' });
+      doc.setFontSize(10);
+      doc.text(`Update: ${todayDate}`, 14, 22);
+
+      const headerRow = ['Jenis Aset', ...displayCategories.map(c => c.name), 'Total'];
+      
+      const bodyRows = [];
+      filteredLocations.forEach(loc => {
+        const row = [
+          loc.name,
+          ...displayCategories.map(cat => matrix[loc.name]?.[cat.id] || 0),
+          locationTotals[loc.name] || 0
+        ];
+        bodyRows.push(row);
+      });
+
+      const totalRow = [
+        'Total',
+        ...displayCategories.map(cat => categoryTotals[cat.id] || 0),
+        grandTotal
+      ];
+      bodyRows.push(totalRow);
+
+      doc.autoTable({
+        startY: 28,
+        head: [headerRow],
+        body: bodyRows,
+        theme: 'grid',
+        headStyles: { fillColor: [58, 149, 66] },
+        styles: { fontSize: 8, cellPadding: 2, halign: 'center' },
+        columnStyles: { 0: { halign: 'left' } }, // Jenis Aset left-aligned
+        didParseCell: function(data) {
+          if (data.row.index === bodyRows.length - 1) { // total row
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fillColor = [241, 245, 249];
+          }
+        }
+      });
+
+      doc.save(`dashboard_aset_${new Date().toISOString().slice(0,10)}.pdf`);
+      showToast('Dashboard Aset berhasil di-export ke PDF', 'success');
+    } catch (err) {
+      console.error(err);
+      showToast('Gagal memuat export PDF', 'error');
     }
   };
 

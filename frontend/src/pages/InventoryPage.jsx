@@ -58,6 +58,13 @@ const InventoryPage = () => {
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
 
+  useEffect(() => {
+    if (isAdmin === false) {
+      showToast('Akses ditolak. Anda hanya memiliki akses baca.', 'error');
+      navigate('/dashboard');
+    }
+  }, [isAdmin, navigate, showToast]);
+
   const handleDeleteBrand = (item, e) => {
     if (e) {
       e.stopPropagation();
