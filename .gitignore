@@ -34,3 +34,7 @@ Thumbs.db
 # Local PostgreSQL binaries & data
 pgsql/
 backend/pgsql/
+
+# Scratch directories
+scratch/
+/scratch
