@@ -147,8 +147,14 @@ const HistoryPage = () => {
       const lBrand = (l.brand || '').toLowerCase();
       const lModel = (l.model_number || '').toLowerCase();
 
-      if (targetId && lId && targetId === lId) return true;
+      // If both have asset_ids, they must match exactly.
+      if (targetId && lId) {
+        return targetId === lId;
+      }
+
+      // If one is missing asset_id, fallback to brand & model matching
       if (targetBrand && lBrand && targetBrand === lBrand && (!targetModel || targetModel === lModel)) return true;
+      
       return false;
     }).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
   };

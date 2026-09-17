@@ -779,17 +779,20 @@ const FloorCanvas = ({
                   strokeWidth={2 / stageState.scale}
                   fill={colorTheme.fill}
                   onClick={(e) => {
+                    if (activeMobileSlotTemplate) return;
                     if (onPolygonClick) {
                       e.cancelBubble = true;
                       onPolygonClick(polygon);
                     }
                   }}
                   onTap={(e) => {
+                    if (activeMobileSlotTemplate) return;
                     if (onPolygonClick) {
                       e.cancelBubble = true;
                       onPolygonClick(polygon);
                     }
                   }}
+
                 />
                 {centroid.x !== 0 && centroid.y !== 0 && (
                   <Text

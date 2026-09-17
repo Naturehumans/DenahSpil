@@ -214,18 +214,19 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
                       statusText.includes('dihapus')
                      );
 
+    const isMove = actionType.includes('move') || locationLower.includes('dipindahkan dari');
+
     // Dipasang:
-    const isDipasang = !isDilepasKembali && (
+    const isDipasang = !isDilepasKembali && !isMove && (
                        actionType.includes('deploy') ||
-                       actionType.includes('move') ||
                        locationLower.includes('ditempatkan') ||
                        locationLower.includes('penempatan')
                       );
 
     const isKeluar = isDiscard || isDipasang;
 
-    // MASUK = Selain keluar (misal: tambah stok, diretur, dilepas, rusak/masuk perbaikan, dsb)
-    const isMasuk = !isKeluar;
+    // MASUK = Selain keluar dan bukan perpindahan (misal: tambah stok, diretur, dilepas, rusak/masuk perbaikan, dsb)
+    const isMasuk = !isKeluar && !isMove;
     const logQty = parseInt(log.quantity || log.qty || log.stock) || 1;
 
     let finalLocationText = '';

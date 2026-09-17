@@ -266,7 +266,9 @@ const DashboardPage = () => {
       setSlots(prev => [...prev, newSlot]);
       showToast(`Slot ${cat.name} berhasil ditempatkan di area ${detectedRoom}`, 'success');
     } catch (err) {
-      showToast('Gagal membuat slot', 'error');
+      console.error(err);
+      const detail = err.response?.data?.detail || err.message || 'Error tidak diketahui';
+      showToast(`Gagal membuat slot: ${detail}`, 'error');
     }
   };
 
