@@ -77,6 +77,7 @@ const DashboardPage = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [categoryBlockedNotice, setCategoryBlockedNotice] = useState(null);
   const [activeMobileSlotTemplate, setActiveMobileSlotTemplate] = useState(null);
+  const [activeMobileItemPlacement, setActiveMobileItemPlacement] = useState(null);
   const [pendingReplacement, setPendingReplacement] = useState(null);
   const [pendingSlotMove, setPendingSlotMove] = useState(null);
   const pendingActionRef = useRef(false);
@@ -207,6 +208,10 @@ const DashboardPage = () => {
   };
 
   const handleEquipmentClick = (eq) => {
+    if (activeMobileItemPlacement) {
+      showToast('Masukkan pada slot yang ada dan sesuai!', 'warning');
+      return;
+    }
     setSelectedEquipment(eq);
     const slot = slots.find(s => s.equipment_id === eq.id || s.equipment?.id === eq.id);
     if (slot) setSelectedSlot(slot);
@@ -240,7 +245,10 @@ const DashboardPage = () => {
   };
 
   const handleCanvasClick = async (pos) => {
-    // In edit mode, we use drag and drop now. Canvas clicks don't do anything by themselves.
+    if (activeMobileItemPlacement) {
+      showToast('Masukkan pada slot yang ada dan sesuai!', 'warning');
+      return;
+    }
   };
 
   const handleSlotDrop = async (categoryId, x, y) => {
@@ -277,6 +285,10 @@ const DashboardPage = () => {
   };
 
   const handleRoomPolygonClick = (polygon) => {
+    if (activeMobileItemPlacement) {
+      showToast('Masukkan pada slot yang ada dan sesuai!', 'warning');
+      return;
+    }
     if (!polygon || !polygon.coordinates) return;
     
     // Find all slots physically located inside this polygon
@@ -787,6 +799,12 @@ const DashboardPage = () => {
 
 
   const handleSlotSelect = (slot, eq) => {
+    if (activeMobileItemPlacement) {
+      handleItemDropOnSlot(activeMobileItemPlacement.id, slot.id);
+      setActiveMobileItemPlacement(null);
+      return;
+    }
+    
     if (eq) {
       setSelectedEquipment(eq);
       setSelectedSlot(slot);
@@ -1233,6 +1251,11 @@ const DashboardPage = () => {
         setActiveMobileSlotTemplate(cat);
         showToast(`Slot ${cat.name} dipilih! Tekan 1s pada denah untuk menempatkan.`, 'info');
       }}
+      activeMobileItemPlacement={activeMobileItemPlacement}
+      onSelectMobileItemPlacement={(cat) => {
+        setActiveMobileItemPlacement(cat);
+        showToast(`Barang ${cat.name} dipilih! Klik pada slot yang sesuai di denah.`, 'info');
+      }}
     >
       {isEditMode && (
         <div className="edit-mode-banner" style={{
@@ -1376,6 +1399,8 @@ const DashboardPage = () => {
         onExport={handleExport}
         activeMobileSlotTemplate={activeMobileSlotTemplate}
         onCancelMobilePlacement={() => setActiveMobileSlotTemplate(null)}
+        activeMobileItemPlacement={activeMobileItemPlacement}
+        onCancelMobileItemPlacement={() => setActiveMobileItemPlacement(null)}
         roomPolygons={roomPolygons}
         isDrawingPolygon={isDrawingPolygon}
         currentPolygon={currentPolygon}
@@ -1445,7 +1470,7 @@ const DashboardPage = () => {
                     </label>
                     <select
                       value={confirmAssignItem.acAssignType || 'in_out'}
-                      onChange={(e) => setConfirmAssignItem({ ...confirmAssignItem, acAssignType: e.target.value })}
+                      onChange={(e) => setConfirmAssignItem({ ...confirmAssignItem, acAssignType: e.target.value, acInAssetId: '', acOutAssetId: '' })}
                       style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)', fontSize: '1rem', outline: 'none', background: 'var(--color-bg)', color: 'var(--color-text)' }}
                     >
                       <option value="in_out">Keduanya (Unit Dalam & Kompresor)</option>
@@ -1506,25 +1531,7 @@ const DashboardPage = () => {
                 )}
                 
                 {confirmAssignItem.acAssignType && !confirmAssignItem.isCustom && (
-                  <div style={{ marginTop: '16px' }}>
-                    <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>
-                      Tipe Pemasangan / Penggantian AC
-                    </label>
-                    <select 
-                      value={confirmAssignItem.acAssignType}
-                      onChange={(e) => setConfirmAssignItem({ ...confirmAssignItem, acAssignType: e.target.value, acInAssetId: '', acOutAssetId: '' })}
-                      className="neu-inset"
-                      style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', border: 'none', background: 'var(--color-bg)', color: 'var(--color-text)', fontSize: '0.875rem', outline: 'none' }}
-                    >
-                      <option value="in_out">Keduanya (IN & OUT)</option>
-                      <option value="in">Hanya Unit Dalam (IN)</option>
-                      <option value="out">Hanya Kompresor (OUT)</option>
-                    </select>
-                  </div>
-                )}
-                
-                {confirmAssignItem.acAssignType && !confirmAssignItem.isCustom && (
-                  <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>
                     {(confirmAssignItem.acAssignType === 'in' || confirmAssignItem.acAssignType === 'in_out') && (
                       <div style={{ flex: 1 }}>
                         <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--color-text-secondary)', display: 'block', marginBottom: '4px' }}>

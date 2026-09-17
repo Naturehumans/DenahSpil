@@ -92,7 +92,7 @@ const LeftSidebar = ({
         transition: 'transform 0.3s ease',
       }}
     >
-      <div className="neu-raised" style={{ padding: '16px', flex: '1', display: 'flex', flexDirection: 'column', gap: '20px', overflow: 'hidden' }}>
+      <div className="neu-raised" style={{ padding: '16px', flex: '1', display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto' }}>
         
         {/* Search */}
         <div style={{ position: 'relative', flexShrink: 0 }}>
@@ -106,9 +106,9 @@ const LeftSidebar = ({
         </div>
 
         {/* Area & Floor Accordion */}
-        <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0, maxHeight: '250px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
           <h3 style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Area & Lantai</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', paddingRight: '4px', paddingBottom: '4px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px', paddingBottom: '4px' }}>
             {buildings.map(bldg => {
               const isExpanded = expandedBuildingIds.includes(bldg.id);
               
@@ -211,9 +211,9 @@ const LeftSidebar = ({
         </div>
 
         {/* Categories Filter List */}
-        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
           <h3 style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px', flexShrink: 0 }}>Kategori Barang</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', paddingRight: '4px', paddingBottom: '4px', flex: 1 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px', paddingBottom: '4px' }}>
             
             <button 
               onClick={() => onSelectCategory(null)}

@@ -7,7 +7,8 @@ const EditLeftSidebar = ({
   buildings = [], currentBuilding, onSelectBuilding,
   floors = [], currentFloor, onSelectFloor,
   isDrawingPolygon, setIsDrawingPolygon,
-  currentPolygon, setCurrentPolygon, onPolygonComplete
+  currentPolygon, setCurrentPolygon, onPolygonComplete,
+  activeMobileItemPlacement, onSelectMobileItemPlacement
 }) => {
   const [expandedBuildingIds, setExpandedBuildingIds] = React.useState([]);
   const hoverTimerRef = React.useRef(null);
@@ -91,6 +92,7 @@ const EditLeftSidebar = ({
         gap: '16px',
         padding: '16px',
         borderRight: '1px solid var(--color-bg)',
+        overflowY: 'auto'
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -103,14 +105,10 @@ const EditLeftSidebar = ({
         </button>
       </div>
 
-      <div style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '8px' }}>
-        Tarik (drag) barang dari sini dan lepaskan di atas slot template yang sesuai.
-      </div>
-
       {/* Area & Floor Accordion */}
-      <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0, maxHeight: '250px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
         <h3 style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Area & Lantai</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', paddingRight: '4px', paddingBottom: '4px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px', paddingBottom: '4px' }}>
           {buildings.map(bldg => {
             const isExpanded = expandedBuildingIds.includes(bldg.id);
             
@@ -227,7 +225,7 @@ const EditLeftSidebar = ({
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flexShrink: 0, paddingRight: '4px' }}>
         {!isDrawingPolygon ? (
           <button
             className="neu-raised-sm"
@@ -331,16 +329,21 @@ const EditLeftSidebar = ({
               }}
             >
               <div 
-                draggable={!isOutOfStock}
-                onDragStart={(e) => handleDragStart(e, cat)}
+                onClick={() => {
+                  if (!isOutOfStock && onSelectMobileItemPlacement) {
+                    onSelectMobileItemPlacement(cat);
+                    if (onClose) onClose();
+                  }
+                }}
                 style={{ 
                   width: '32px', height: '32px', borderRadius: '50%', 
                   background: `${cat.color || '#3b82f6'}30`, 
                   color: cat.color || '#3b82f6', 
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontWeight: 'bold', fontSize: '1rem', flexShrink: 0,
-                  cursor: isOutOfStock ? 'not-allowed' : 'grab',
+                  cursor: isOutOfStock ? 'not-allowed' : 'pointer',
                   opacity: isOutOfStock ? 0.6 : 1,
+                  boxShadow: activeMobileItemPlacement?.id === cat.id ? '0 0 0 2px var(--color-primary)' : 'none'
                 }}>
                 {cat.name.charAt(0).toUpperCase()}
               </div>

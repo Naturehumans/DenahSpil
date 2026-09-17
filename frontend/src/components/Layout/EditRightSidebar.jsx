@@ -52,6 +52,7 @@ const EditRightSidebar = ({ isOpen, onClose, categories = [], slots = [], onDele
         flexDirection: 'column',
         gap: '16px',
         padding: '16px',
+        overflowY: 'auto'
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -64,12 +65,12 @@ const EditRightSidebar = ({ isOpen, onClose, categories = [], slots = [], onDele
         </button>
       </div>
 
-      <div className="neu-inset" style={{ padding: '16px', borderRadius: '12px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      <div className="neu-inset" style={{ padding: '16px', borderRadius: '12px', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
         <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 'bold', color: 'var(--color-text-secondary)', marginBottom: '8px', flexShrink: 0 }}>
           Pilih Kategori Slot
         </label>
         
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
           {categories.map(cat => {
             const isSelected = selectedCategoryId === cat.id;
             return (
@@ -135,7 +136,7 @@ const EditRightSidebar = ({ isOpen, onClose, categories = [], slots = [], onDele
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', flex: 1, paddingRight: '4px', minHeight: 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flexShrink: 0, paddingRight: '4px' }}>
         <h3 style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '4px', marginTop: '8px', flexShrink: 0 }}>Daftar Slot di Lantai Ini</h3>
         
         {slots.map(slot => {

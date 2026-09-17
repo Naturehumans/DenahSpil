@@ -22,6 +22,8 @@ const FloorCanvas = ({
   onExport,
   activeMobileSlotTemplate = null,
   onCancelMobilePlacement = null,
+  activeMobileItemPlacement = null,
+  onCancelMobileItemPlacement = null,
   onCanvasClick,
   roomPolygons = [],
   isDrawingPolygon = false,
@@ -659,8 +661,8 @@ const FloorCanvas = ({
       onDragEnter={handleDragEnter}
       onDrop={handleDrop}
     >
-      {/* Active Mobile Slot Placement Banner */}
-      {activeMobileSlotTemplate && (
+      {/* Active Mobile Placement Banners */}
+      {(activeMobileSlotTemplate || activeMobileItemPlacement) && (
         <div style={{
           position: 'absolute',
           top: '16px',
@@ -680,11 +682,16 @@ const FloorCanvas = ({
           maxWidth: '90%',
           pointerEvents: 'auto'
         }}>
-          <span>📌 Mode Slot ({activeMobileSlotTemplate.name}): Ketuk lokasi pada denah</span>
+          {activeMobileSlotTemplate ? (
+            <span>📌 Mode Slot ({activeMobileSlotTemplate.name}): Ketuk lokasi pada denah</span>
+          ) : (
+            <span>📦 Mode Barang ({activeMobileItemPlacement.name}): Klik pada slot di denah</span>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation();
-              if (onCancelMobilePlacement) onCancelMobilePlacement();
+              if (activeMobileSlotTemplate && onCancelMobilePlacement) onCancelMobilePlacement();
+              if (activeMobileItemPlacement && onCancelMobileItemPlacement) onCancelMobileItemPlacement();
             }}
             style={{
               background: 'rgba(255,255,255,0.25)',

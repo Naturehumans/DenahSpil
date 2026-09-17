@@ -37,6 +37,8 @@ const MainLayout = ({
   currentPolygon,
   setCurrentPolygon,
   onPolygonComplete,
+  activeMobileItemPlacement,
+  onSelectMobileItemPlacement,
   isAdmin = true
 }) => {
   const [leftOpen, setLeftOpen] = useState(false);
@@ -92,6 +94,8 @@ const MainLayout = ({
               currentPolygon={currentPolygon}
               setCurrentPolygon={setCurrentPolygon}
               onPolygonComplete={onPolygonComplete}
+              activeMobileItemPlacement={activeMobileItemPlacement}
+              onSelectMobileItemPlacement={onSelectMobileItemPlacement}
             />
           ) : (
             <LeftSidebar 
