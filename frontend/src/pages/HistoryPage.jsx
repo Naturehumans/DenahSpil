@@ -358,7 +358,8 @@ const HistoryPage = () => {
 
     try {
       const { jsPDF } = await import('jspdf');
-      await import('jspdf-autotable');
+      const autoTableModule = await import('jspdf-autotable');
+      const autoTable = autoTableModule.default || autoTableModule;
       const doc = new jsPDF('landscape');
 
       doc.setFontSize(14);
@@ -379,7 +380,7 @@ const HistoryPage = () => {
         new Date(log.created_at).toLocaleDateString('id-ID')
       ]);
 
-      doc.autoTable({
+      autoTable(doc, {
         startY: 28,
         head: [['Lokasi', 'Lantai', 'Ruang', 'ID Slot', 'ID Aset', 'Kategori', 'Merk', 'Tipe/Model', 'Kondisi', 'Tanggal']],
         body: tableBody,
@@ -445,7 +446,8 @@ const HistoryPage = () => {
 
     try {
       const { jsPDF } = await import('jspdf');
-      await import('jspdf-autotable');
+      const autoTableModule = await import('jspdf-autotable');
+      const autoTable = autoTableModule.default || autoTableModule;
       const doc = new jsPDF('landscape');
 
       doc.setFontSize(14);
@@ -466,7 +468,7 @@ const HistoryPage = () => {
         ];
       });
 
-      doc.autoTable({
+      autoTable(doc, {
         startY: 28,
         head: [['Kategori Barang', 'Merk & Tipe', 'Jumlah Stok', 'Tanggal Pembelian', 'Tanggal Kedaluwarsa', 'Status / Sisa Hari']],
         body: tableBody,

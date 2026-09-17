@@ -370,7 +370,8 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
   const handleExportPDF = async () => {
     try {
       const { jsPDF } = await import('jspdf');
-      await import('jspdf-autotable');
+      const autoTableModule = await import('jspdf-autotable');
+      const autoTable = autoTableModule.default || autoTableModule;
 
       const doc = new jsPDF('landscape');
       
@@ -436,13 +437,13 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
         return row;
       });
 
-      doc.autoTable({
+      autoTable(doc, {
         startY: 28,
         head: [headRow1, headRow2, headRow3],
         body: bodyRows,
         theme: 'grid',
-        headStyles: { fillColor: [248, 250, 252], textColor: [51, 65, 85], fontStyle: 'bold' },
-        styles: { fontSize: 8, cellPadding: 2, halign: 'center' },
+        headStyles: { fillColor: [58, 149, 66], textColor: [255, 255, 255] },
+        styles: { fontSize: 8, cellPadding: 2, halign: 'center', valign: 'middle' },
         columnStyles: {
           0: { halign: 'center', cellWidth: 10 },
           1: { halign: 'center', cellWidth: 20 },

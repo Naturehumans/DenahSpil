@@ -310,7 +310,8 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
   const handleExportPDF = async () => {
     try {
       const { jsPDF } = await import('jspdf');
-      await import('jspdf-autotable');
+      const autoTableModule = await import('jspdf-autotable');
+      const autoTable = autoTableModule.default || autoTableModule;
       
       const doc = new jsPDF('landscape');
       
@@ -340,7 +341,7 @@ const AssetDashboardMatrix = ({ onRegisterExport }) => {
       ];
       bodyRows.push(totalRow);
 
-      doc.autoTable({
+      autoTable(doc, {
         startY: 28,
         head: [headerRow],
         body: bodyRows,
