@@ -31,6 +31,7 @@ def abbreviate(name: str) -> str:
         return w[0].upper()
     return "".join(word[0].upper() for word in words)
 
+import re
 import os
 
 def generate_ac_name(ac_in_id: str, ac_out_id: str) -> str:
@@ -41,6 +42,9 @@ def generate_ac_name(ac_in_id: str, ac_out_id: str) -> str:
             return f"{in_base}-IN/OUT"
         else:
             common_prefix = os.path.commonprefix([in_base, out_base])
+            # Avoid cutting numbers in half (e.g. 017 and 016 -> common prefix 01)
+            common_prefix = re.sub(r'\d+$', '', common_prefix)
+            
             if common_prefix and len(common_prefix) > 4:
                 in_suffix = in_base[len(common_prefix):]
                 out_suffix = out_base[len(common_prefix):]
