@@ -15,11 +15,16 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
   const [equipments, setEquipments] = useState([]);
   const [assets, setAssets] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedSubItemNames, setSelectedSubItemNames] = useState([]);
   const { showToast } = useToast();
 
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    setSelectedSubItemNames([]);
+  }, [selectedCategoryId]);
 
   useEffect(() => {
     if (onRegisterExport) {
@@ -126,7 +131,10 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
     return [];
   };
 
-  const categorySubItems = getSubItemsForCategory(selectedCategory);
+  const allCategorySubItems = getSubItemsForCategory(selectedCategory);
+  const categorySubItems = allCategorySubItems.filter(item => 
+    selectedSubItemNames.length === 0 || selectedSubItemNames.includes(item.name)
+  );
 
   // Filter logs strictly for selected category and deduplicate identical API + Local entries
   const filteredCategoryLogs = (() => {
@@ -288,7 +296,34 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
     }));
   };
 
-  const displayRows = usageRows.length > 0 ? usageRows : getUserStockRows();
+  const checkIfRowMatchesItem = (rowModelNameStr, item, forceMatchIfSingle) => {
+    const itemBrand = (item.brand || '').toLowerCase().trim();
+    const itemModel = (item.model_number || '').toLowerCase().trim();
+    const itemName = (item.name || '').toLowerCase().trim();
+    const rowModelName = (rowModelNameStr || '').toLowerCase().trim();
+
+    let isMatch = false;
+    if (rowModelName && itemName) {
+      if (rowModelName === itemName) {
+        isMatch = true;
+      } else if (itemModel && itemModel !== 'standard' && itemModel.length > 2 && rowModelName.includes(itemModel)) {
+        if (!itemBrand || itemBrand === '-' || rowModelName.includes(itemBrand)) isMatch = true;
+      } else if (itemBrand && itemBrand !== '-' && rowModelName.includes(itemBrand)) {
+        if (!itemModel || itemModel === 'standard') {
+          if (!rowModelName.includes('(')) isMatch = true;
+        } else if (rowModelName.includes(itemModel)) {
+          isMatch = true;
+        }
+      }
+    }
+    if (!isMatch && forceMatchIfSingle) isMatch = true;
+    return isMatch;
+  };
+
+  const baseRows = usageRows.length > 0 ? usageRows : getUserStockRows();
+  const displayRows = baseRows.filter(r => 
+    categorySubItems.some(item => checkIfRowMatchesItem(r.modelName, item, allCategorySubItems.length === 1))
+  );
 
   const handleExportXLSX = () => {
     try {
@@ -329,8 +364,7 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
       displayRows.forEach((r, idx) => {
         const row = [idx + 1, r.date];
         categorySubItems.forEach(item => {
-          const isTarget = r.modelName.toLowerCase().includes(item.name.toLowerCase()) ||
-                           item.name.toLowerCase().includes(r.modelName.toLowerCase());
+          const isTarget = checkIfRowMatchesItem(r.modelName, item, allCategorySubItems.length === 1);
           if (isTarget) {
             row.push(r.isMasuk ? r.qty : '', r.isKeluar ? r.qty : '');
           } else {
@@ -407,27 +441,7 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
       const bodyRows = displayRows.map(r => {
         const row = [r.no, r.date];
         categorySubItems.forEach((item) => {
-          // find if this row matches the item
-          const itemBrand = (item.brand || '').toLowerCase().trim();
-          const itemModel = (item.model_number || '').toLowerCase().trim();
-          const itemName = (item.name || '').toLowerCase().trim();
-          const rowModelName = (r.modelName || '').toLowerCase().trim();
-
-          let isMatch = false;
-          if (rowModelName && itemName) {
-            if (rowModelName === itemName) {
-              isMatch = true;
-            } else if (itemModel && itemModel !== 'standard' && itemModel.length > 2 && rowModelName.includes(itemModel)) {
-              if (!itemBrand || itemBrand === '-' || rowModelName.includes(itemBrand)) isMatch = true;
-            } else if (itemBrand && itemBrand !== '-' && rowModelName.includes(itemBrand)) {
-              if (!itemModel || itemModel === 'standard') {
-                if (!rowModelName.includes('(')) isMatch = true;
-              } else if (rowModelName.includes(itemModel)) {
-                isMatch = true;
-              }
-            }
-          }
-          if (!isMatch && categorySubItems.length === 1) isMatch = true;
+          const isMatch = checkIfRowMatchesItem(r.modelName, item, allCategorySubItems.length === 1);
 
           const masukVal = isMatch && r.isMasuk ? r.qty : '';
           const keluarVal = isMatch && r.isKeluar ? r.qty : '';
@@ -530,7 +544,52 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
           </div>
         </div>
 
-
+        {allCategorySubItems.length > 0 && (
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '14px', width: '100%' }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--color-text-secondary)', marginRight: '4px', alignSelf: 'center' }}>Filter Item:</span>
+            <button
+              onClick={() => setSelectedSubItemNames([])}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '20px',
+                fontSize: '0.8rem',
+                fontWeight: '600',
+                cursor: 'pointer',
+                background: selectedSubItemNames.length === 0 ? 'var(--color-primary)' : 'var(--color-bg)',
+                color: selectedSubItemNames.length === 0 ? '#fff' : 'var(--color-text-secondary)',
+                boxShadow: selectedSubItemNames.length === 0 ? '0 4px 10px rgba(58, 149, 66, 0.2)' : 'none',
+                border: selectedSubItemNames.length === 0 ? 'none' : '1px solid rgba(0,0,0,0.1)'
+              }}
+            >
+              Semua
+            </button>
+            {allCategorySubItems.map(item => (
+              <button
+                key={item.name}
+                onClick={() => {
+                  if (selectedSubItemNames.includes(item.name)) {
+                    setSelectedSubItemNames(selectedSubItemNames.filter(n => n !== item.name));
+                  } else {
+                    setSelectedSubItemNames([...selectedSubItemNames, item.name]);
+                  }
+                }}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '20px',
+                  fontSize: '0.8rem',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  background: selectedSubItemNames.includes(item.name) ? '#2563eb' : 'var(--color-bg)',
+                  color: selectedSubItemNames.includes(item.name) ? '#fff' : 'var(--color-text)',
+                  boxShadow: selectedSubItemNames.includes(item.name) ? '0 4px 10px rgba(37, 99, 235, 0.2)' : 'none',
+                  border: selectedSubItemNames.includes(item.name) ? 'none' : '1px solid rgba(0,0,0,0.1)'
+                }}
+              >
+                {item.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Main Excel-Style Usage Matrix Table Container */}
@@ -665,37 +724,7 @@ const CategoryUsageTracker = ({ onRegisterExport }) => {
 
                     {/* Sub-item values */}
                     {categorySubItems.map((item, itemIdx) => {
-                      const itemBrand = (item.brand || '').toLowerCase().trim();
-                      const itemModel = (item.model_number || '').toLowerCase().trim();
-                      const itemName = (item.name || '').toLowerCase().trim();
-                      const rowModelName = (r.modelName || '').toLowerCase().trim();
-
-                      let isMatch = false;
-                      if (rowModelName && itemName) {
-                        if (rowModelName === itemName) {
-                          // Exact full-name match (e.g. "gree (inverter 1pk)" === "gree (inverter 1pk)")
-                          isMatch = true;
-                        } else if (itemModel && itemModel !== 'standard' && itemModel.length > 2 && rowModelName.includes(itemModel)) {
-                          // Model match — WAJIB juga cek brand agar Gree tidak masuk kolom LG & sebaliknya
-                          // Jika item memiliki brand yang jelas, rowModelName harus mengandung brand tersebut
-                          if (!itemBrand || itemBrand === '-' || rowModelName.includes(itemBrand)) {
-                            isMatch = true;
-                          }
-                        } else if (itemBrand && itemBrand !== '-' && rowModelName.includes(itemBrand)) {
-                          // Brand match — pastikan model juga cocok (atau item tidak punya model spesifik)
-                          if (!itemModel || itemModel === 'standard') {
-                            // Jika kolom ini adalah tipe generic (Standard), JANGAN cocokkan jika log mutasi memiliki tipe/model spesifik (ditandai dengan kurung)
-                            if (!rowModelName.includes('(')) {
-                              isMatch = true;
-                            }
-                          } else if (rowModelName.includes(itemModel)) {
-                            isMatch = true;
-                          }
-                        }
-                      }
-                      if (!isMatch && categorySubItems.length === 1) {
-                        isMatch = true;
-                      }
+                      const isMatch = checkIfRowMatchesItem(r.modelName, item, allCategorySubItems.length === 1);
 
                       const masukVal = isMatch && r.isMasuk ? r.qty : '';
                       const keluarVal = isMatch && r.isKeluar ? r.qty : '';
