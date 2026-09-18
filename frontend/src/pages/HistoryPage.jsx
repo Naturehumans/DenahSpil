@@ -274,7 +274,42 @@ const HistoryPage = () => {
     return true;
   });
 
-  // Sort logs
+  // Group logs by asset ID to only show the latest status
+  const groupedLogsMap = new Map();
+  // Sort descending by date to easily pick the latest log
+  const descLogs = [...filteredLogs].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  
+  descLogs.forEach(log => {
+    const assetKey = log.asset_id || `${log.category?.name || 'unknown'}_${log.brand || '-'}_${log.model_number || 'std'}`;
+    if (!groupedLogsMap.has(assetKey)) {
+      groupedLogsMap.set(assetKey, log);
+    }
+  });
+  
+  const groupedLogs = Array.from(groupedLogsMap.values());
+
+  // Sort grouped logs for display
+  const sortedGroupedLogs = [...groupedLogs].sort((a, b) => {
+    let valA = a[sortField] || '';
+    let valB = b[sortField] || '';
+
+    if (sortField === 'building_name') {
+      valA = getBuildingName(a);
+      valB = getBuildingName(b);
+    } else if (sortField === 'floor_name') {
+      valA = getFloorName(a);
+      valB = getFloorName(b);
+    } else if (sortField === 'status') {
+      valA = getStatusText(a);
+      valB = getStatusText(b);
+    }
+
+    if (valA < valB) return sortAsc ? -1 : 1;
+    if (valA > valB) return sortAsc ? 1 : -1;
+    return 0;
+  });
+
+  // Keep flat sorted logs for Export functionality
   const sortedLogs = [...filteredLogs].sort((a, b) => {
     let valA = a[sortField] || '';
     let valB = b[sortField] || '';
@@ -295,8 +330,8 @@ const HistoryPage = () => {
     return 0;
   });
 
-  const totalPages = Math.ceil(sortedLogs.length / itemsPerPage) || 1;
-  const paginatedLogs = sortedLogs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const totalPages = Math.ceil(sortedGroupedLogs.length / itemsPerPage) || 1;
+  const paginatedLogs = sortedGroupedLogs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const handleSort = (field) => {
     if (sortField === field) {
